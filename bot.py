@@ -310,7 +310,10 @@ class RaffleForm(discord.ui.Modal):
         await interaction.response.defer(ephemeral=True)
 
         try:
-            # 驗證輸入
+            # 提取並驗證輸入
+            title = self.title_input.value
+            content = self.content_input.value
+
             try:
                 days = int(self.days_input.value)
                 winners_count = int(self.winners_input.value)
@@ -350,7 +353,7 @@ class RaffleForm(discord.ui.Modal):
             c.execute('''INSERT INTO raffles
                 (creator_id, title, content, winners_count, start_time, end_time, status)
                 VALUES (?, ?, ?, ?, ?, ?, ?)''',
-                (interaction.user.id, self.title_input.value, self.content_input.value,
+                (interaction.user.id, title, content,
                  winners_count, now_iso, end_time_iso, 'active'))
 
             raffle_id = c.lastrowid
@@ -359,8 +362,8 @@ class RaffleForm(discord.ui.Modal):
 
             # 發送抽獎公告
             embed = discord.Embed(
-                title=f"🎰 {self.title_input.value}",
-                description=self.content_input.value,
+                title=f"🎰 {title}",
+                description=content,
                 color=discord.Color.gold()
             )
             embed.add_field(name="活動結束時間", value=end_time.strftime("%Y-%m-%d %H:%M:%S"), inline=False)
@@ -475,6 +478,100 @@ class RaffleButtonView(discord.ui.View):
                 await interaction.followup.send("[ERROR] 找不到抽獎資訊", ephemeral=True)
         except Exception as e:
             print(f"[ERROR] 查看報名錯誤: {str(e)}")
+            await interaction.followup.send(
+                f"[ERROR] 出現錯誤: {str(e)}",
+                ephemeral=True
+            )
+
+    @discord.ui.button(label="結束抽獎 (管理員)", style=1)
+    async def end_raffle_button(self, interaction: Interaction, button: discord.ui.Button):
+        """提早結束抽獎 (管理員限定)"""
+        await interaction.response.defer(ephemeral=True)
+
+        try:
+            # 檢查是否是管理員或有對應身份組
+            if not (interaction.user.guild_permissions.administrator or
+                   any(role.id == REQUIRED_ROLE_ID for role in interaction.user.roles)):
+                await interaction.followup.send(
+                    "[ERROR] 只有管理員可以提早結束抽獎",
+                    ephemeral=True
+                )
+                return
+
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+
+            # 獲取抽獎信息
+            c.execute('SELECT title, winners_count FROM raffles WHERE raffle_id = ? AND status = ?',
+                     (self.raffle_id, 'active'))
+            raffle_info = c.fetchone()
+
+            if not raffle_info:
+                await interaction.followup.send("[ERROR] 找不到活動或活動已結束", ephemeral=True)
+                conn.close()
+                return
+
+            title, winners_count = raffle_info
+
+            # 獲取所有報名者
+            c.execute('SELECT user_id, username FROM raffle_entries WHERE raffle_id = ? ORDER BY RANDOM()',
+                     (self.raffle_id,))
+            entries = c.fetchall()
+
+            if not entries:
+                await interaction.followup.send("[ERROR] 沒有報名者", ephemeral=True)
+                c.execute('UPDATE raffles SET status = ? WHERE raffle_id = ?', ('no_entries', self.raffle_id))
+                conn.commit()
+                conn.close()
+                return
+
+            # 隨機抽取得獎者
+            selected_count = min(winners_count, len(entries))
+            winners = entries[:selected_count]
+
+            # 構建得獎者名單
+            winners_list = []
+            winners_mention = []
+            for user_id, username in winners:
+                winners_list.append(f"<@{user_id}> ({username})")
+                winners_mention.append(f"<@{user_id}>")
+
+            # 獲取頻道發布得獎名單
+            c.execute('SELECT channel_id FROM raffles WHERE raffle_id = ?', (self.raffle_id,))
+            channel_id = c.fetchone()[0]
+            channel = discord.utils.get(interaction.guild.channels, id=channel_id)
+
+            if channel:
+                embed = discord.Embed(
+                    title=f"🎉 {title} - 抽獎結果 (提早結束)",
+                    color=discord.Color.gold()
+                )
+                embed.add_field(
+                    name=f"得獎者 ({selected_count}/{winners_count})",
+                    value="\n".join(winners_list),
+                    inline=False
+                )
+                embed.add_field(
+                    name="總報名人數",
+                    value=f"{len(entries)} 人",
+                    inline=False
+                )
+
+                # 發送訊息
+                mention_str = " ".join(winners_mention)
+                await channel.send(f"🎊 恭喜得獎者！{mention_str}", embed=embed)
+
+            # 更新狀態
+            c.execute('UPDATE raffles SET status = ? WHERE raffle_id = ?', ('drawn', self.raffle_id))
+            conn.commit()
+            conn.close()
+
+            await interaction.followup.send(
+                f"✅ 抽獎已提早結束！\n得獎人數: {selected_count} 人",
+                ephemeral=True
+            )
+        except Exception as e:
+            print(f"[ERROR] 提早結束抽獎錯誤: {str(e)}")
             await interaction.followup.send(
                 f"[ERROR] 出現錯誤: {str(e)}",
                 ephemeral=True
