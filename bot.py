@@ -677,18 +677,13 @@ async def daily_reminder():
     except Exception as e:
         print(f"[ERROR] 定時提醒任務出錯: {e}")
 
-@tasks.loop(hours=1)
+@tasks.loop(minutes=1)
 async def announcement_schedule():
     """每天晚上22:00發布當天的報名名單"""
     try:
         now = datetime.now()
-        # 檢查是否是22:00~22:59分鐘之間
-        if now.hour != 22:
-            return
-
-        # 檢查是否已經在這一小時內發過公告（避免重複發送）
-        # 簡單的方式：只在分鐘是00~05分時發送
-        if now.minute > 5:
+        # 檢查是否是22:00~22:05分鐘之間
+        if now.hour != 22 or now.minute > 5:
             return
 
         conn = sqlite3.connect(DB_PATH)
