@@ -292,7 +292,7 @@ class RaffleForm(discord.ui.Modal):
         placeholder="活動詳細說明",
         required=True,
         max_length=1000,
-        style=discord.ui.TextInputStyle.paragraph
+        style=discord.TextInputStyle.paragraph
     )
     days_input = discord.ui.TextInput(
         label="3. 活動天數",
@@ -401,7 +401,7 @@ class RaffleButtonView(discord.ui.View):
         super().__init__(timeout=None)
         self.raffle_id = raffle_id
 
-    @discord.ui.button(label="報名抽獎", style=discord.ui.ButtonStyle.primary)
+    @discord.ui.button(label="報名抽獎", style=discord.ButtonStyle.primary)
     async def join_button(self, interaction: Interaction, button: discord.ui.Button):
         """報名或取消報名"""
         await interaction.response.defer(ephemeral=True)
@@ -438,7 +438,7 @@ class RaffleButtonView(discord.ui.View):
                 ephemeral=True
             )
 
-    @discord.ui.button(label="查看報名人數", style=discord.ui.ButtonStyle.secondary)
+    @discord.ui.button(label="查看報名人數", style=discord.ButtonStyle.secondary)
     async def check_button(self, interaction: Interaction, button: discord.ui.Button):
         """查看報名人數"""
         await interaction.response.defer(ephemeral=True)
