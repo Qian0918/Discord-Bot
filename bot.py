@@ -403,7 +403,7 @@ class RaffleButtonView(discord.ui.View):
         super().__init__(timeout=None)
         self.raffle_id = raffle_id
 
-    @discord.ui.button(label="報名抽獎", style=1)
+    @discord.ui.button(label="報名抽獎")
     async def join_button(self, interaction: Interaction, button: discord.ui.Button):
         """報名或取消報名"""
         await interaction.response.defer(ephemeral=True)
@@ -440,7 +440,7 @@ class RaffleButtonView(discord.ui.View):
                 ephemeral=True
             )
 
-    @discord.ui.button(label="查看報名人數", style=2)
+    @discord.ui.button(label="查看報名人數")
     async def check_button(self, interaction: Interaction, button: discord.ui.Button):
         """查看報名人數"""
         await interaction.response.defer(ephemeral=True)
@@ -483,7 +483,7 @@ class RaffleButtonView(discord.ui.View):
                 ephemeral=True
             )
 
-    @discord.ui.button(label="結束抽獎 (管理員)", style=1)
+    @discord.ui.button(label="結束抽獎 (管理員)")
     async def end_raffle_button(self, interaction: Interaction, button: discord.ui.Button):
         """提早結束抽獎 (管理員限定)"""
         await interaction.response.defer(ephemeral=True)
