@@ -1,6 +1,7 @@
 import discord
 from discord.ext import commands, tasks
-from discord import app_commands, Interaction, TextInputStyle, ButtonStyle
+from discord import app_commands, Interaction
+from discord.ui import TextInputStyle, ButtonStyle
 import sqlite3
 import os
 from datetime import datetime, timedelta
