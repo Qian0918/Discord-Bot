@@ -6,6 +6,7 @@ import os
 from datetime import datetime, timedelta
 import sys
 import openpyxl
+import random
 
 # 設置 UTF-8 編碼支持
 if sys.platform == 'win32':
@@ -80,6 +81,31 @@ def init_database():
         print("[INFO] 已添加 is_priority 列")
     except sqlite3.OperationalError:
         pass  # 列已存在
+
+    # 創建抽獎表
+    c.execute('''CREATE TABLE IF NOT EXISTS raffles (
+        raffle_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        creator_id INTEGER NOT NULL,
+        title TEXT NOT NULL,
+        content TEXT NOT NULL,
+        winners_count INTEGER NOT NULL,
+        message_id INTEGER,
+        channel_id INTEGER,
+        start_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        end_time TIMESTAMP NOT NULL,
+        status TEXT DEFAULT 'active'
+    )''')
+
+    # 創建抽獎報名表
+    c.execute('''CREATE TABLE IF NOT EXISTS raffle_entries (
+        entry_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        raffle_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        username TEXT NOT NULL,
+        joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(raffle_id) REFERENCES raffles(raffle_id),
+        UNIQUE(raffle_id, user_id)
+    )''')
 
     conn.commit()
     conn.close()
@@ -249,6 +275,210 @@ class EquipmentForm(discord.ui.Modal):
             except:
                 pass
 
+class RaffleForm(discord.ui.Modal):
+    """抽獎活動表單"""
+    title = "創建抽獎活動"
+
+    title_input = discord.ui.TextInput(
+        label="1. 活動名稱",
+        placeholder="輸入活動名稱",
+        required=True,
+        max_length=100
+    )
+    content_input = discord.ui.TextInput(
+        label="2. 活動內容",
+        placeholder="活動詳細說明",
+        required=True,
+        max_length=1000,
+        style=discord.TextInputStyle.paragraph
+    )
+    days_input = discord.ui.TextInput(
+        label="3. 活動天數",
+        placeholder="例如：3（代表3天後抽獎）",
+        required=True,
+        max_length=2
+    )
+    winners_input = discord.ui.TextInput(
+        label="4. 得獎人數",
+        placeholder="例如：5",
+        required=True,
+        max_length=3
+    )
+
+    async def on_submit(self, interaction: Interaction):
+        await interaction.response.defer(ephemeral=True)
+
+        try:
+            # 驗證輸入
+            try:
+                days = int(self.days_input.value)
+                winners_count = int(self.winners_input.value)
+            except ValueError:
+                await interaction.followup.send(
+                    "[ERROR] 活動天數和得獎人數必須是數字",
+                    ephemeral=True
+                )
+                return
+
+            # 驗證天數範圍
+            if days < 1 or days > 30:
+                await interaction.followup.send(
+                    "[ERROR] 活動天數必須介於 1-30 天之間",
+                    ephemeral=True
+                )
+                return
+
+            # 驗證得獎人數
+            if winners_count < 1 or winners_count > 100:
+                await interaction.followup.send(
+                    "[ERROR] 得獎人數必須介於 1-100 之間",
+                    ephemeral=True
+                )
+                return
+
+            # 計算結束時間
+            now = datetime.now()
+            end_time = now + timedelta(days=days)
+            end_time_iso = end_time.isoformat()
+            now_iso = now.isoformat()
+
+            # 保存到數據庫
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+
+            c.execute('''INSERT INTO raffles
+                (creator_id, title, content, winners_count, start_time, end_time, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?)''',
+                (interaction.user.id, self.title_input.value, self.content_input.value,
+                 winners_count, now_iso, end_time_iso, 'active'))
+
+            raffle_id = c.lastrowid
+            conn.commit()
+            conn.close()
+
+            # 發送抽獎公告
+            embed = discord.Embed(
+                title=f"🎰 {self.title_input.value}",
+                description=self.content_input.value,
+                color=discord.Color.gold()
+            )
+            embed.add_field(name="活動結束時間", value=end_time.strftime("%Y-%m-%d %H:%M:%S"), inline=False)
+            embed.add_field(name="得獎人數", value=f"{winners_count} 人", inline=False)
+            embed.add_field(name="活動天數", value=f"{days} 天", inline=False)
+            embed.set_footer(text=f"抽獎 ID: {raffle_id} | 點擊下方按鈕報名")
+
+            view = RaffleButtonView(raffle_id)
+            msg = await interaction.channel.send(embed=embed, view=view)
+
+            # 保存訊息 ID
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+            c.execute('UPDATE raffles SET message_id = ?, channel_id = ? WHERE raffle_id = ?',
+                     (msg.id, interaction.channel_id, raffle_id))
+            conn.commit()
+            conn.close()
+
+            await interaction.followup.send(
+                f"✅ 抽獎活動已創建！\n抽獎 ID: {raffle_id}\n結束時間: {end_time.strftime('%m/%d %H:%M')}",
+                ephemeral=True
+            )
+        except Exception as e:
+            print(f"[ERROR] 抽獎表單錯誤: {type(e).__name__}: {str(e)}")
+            try:
+                await interaction.followup.send(
+                    f"[ERROR] 出現錯誤: {str(e)}",
+                    ephemeral=True
+                )
+            except:
+                pass
+
+
+class RaffleButtonView(discord.ui.View):
+    """抽獎按鈕視圖"""
+    def __init__(self, raffle_id):
+        super().__init__(timeout=None)
+        self.raffle_id = raffle_id
+
+    @discord.ui.button(label="報名抽獎", style=discord.ButtonStyle.primary)
+    async def join_button(self, interaction: Interaction, button: discord.ui.Button):
+        """報名或取消報名"""
+        await interaction.response.defer(ephemeral=True)
+
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+
+            # 檢查用戶是否已報名
+            c.execute('SELECT entry_id FROM raffle_entries WHERE raffle_id = ? AND user_id = ?',
+                     (self.raffle_id, interaction.user.id))
+            existing = c.fetchone()
+
+            if existing:
+                # 已報名，移除報名
+                c.execute('DELETE FROM raffle_entries WHERE raffle_id = ? AND user_id = ?',
+                         (self.raffle_id, interaction.user.id))
+                message = "✅ 已取消報名"
+            else:
+                # 未報名，添加報名
+                c.execute('''INSERT INTO raffle_entries (raffle_id, user_id, username)
+                    VALUES (?, ?, ?)''',
+                    (self.raffle_id, interaction.user.id, interaction.user.name))
+                message = "✅ 報名成功"
+
+            conn.commit()
+            conn.close()
+
+            await interaction.followup.send(message, ephemeral=True)
+        except Exception as e:
+            print(f"[ERROR] 報名按鈕錯誤: {str(e)}")
+            await interaction.followup.send(
+                f"[ERROR] 出現錯誤: {str(e)}",
+                ephemeral=True
+            )
+
+    @discord.ui.button(label="查看報名人數", style=discord.ButtonStyle.secondary)
+    async def check_button(self, interaction: Interaction, button: discord.ui.Button):
+        """查看報名人數"""
+        await interaction.response.defer(ephemeral=True)
+
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+
+            # 獲取報名人數
+            c.execute('SELECT COUNT(*) FROM raffle_entries WHERE raffle_id = ?', (self.raffle_id,))
+            count = c.fetchone()[0]
+
+            # 獲取抽獎資訊
+            c.execute('SELECT title, end_time, winners_count FROM raffles WHERE raffle_id = ?',
+                     (self.raffle_id,))
+            raffle_info = c.fetchone()
+            conn.close()
+
+            if raffle_info:
+                title, end_time, winners_count = raffle_info
+                end_time_obj = datetime.fromisoformat(end_time)
+                remaining = end_time_obj - datetime.now()
+
+                embed = discord.Embed(
+                    title=f"📊 {title} - 報名統計",
+                    color=discord.Color.blue()
+                )
+                embed.add_field(name="當前報名人數", value=f"{count} 人", inline=False)
+                embed.add_field(name="得獎人數", value=f"{winners_count} 人", inline=False)
+                embed.add_field(name="中獎機率", value=f"{round(winners_count/max(count,1)*100, 2)}%", inline=False)
+                embed.add_field(name="距離結束", value=f"{remaining.days} 天 {remaining.seconds//3600} 小時", inline=False)
+
+                await interaction.followup.send(embed=embed, ephemeral=True)
+            else:
+                await interaction.followup.send("[ERROR] 找不到抽獎資訊", ephemeral=True)
+        except Exception as e:
+            print(f"[ERROR] 查看報名錯誤: {str(e)}")
+            await interaction.followup.send(
+                f"[ERROR] 出現錯誤: {str(e)}",
+                ephemeral=True
+            )
+
 @bot.event
 async def on_ready():
     """機器人上線事件"""
@@ -288,6 +518,10 @@ async def on_ready():
     if not reminder_wed_9pm.is_running():
         reminder_wed_9pm.start()
         print("[INFO] 已啟動周三晚上提醒")
+
+    if not check_raffle_ended.is_running():
+        check_raffle_ended.start()
+        print("[INFO] 已啟動抽獎檢查任務")
 
     try:
         synced = await bot.tree.sync()
@@ -523,6 +757,76 @@ async def reminder_wed_9pm():
                 print(f"[INFO] 已發送週三晚上提醒")
     except Exception as e:
         print(f"[ERROR] 周三晚上提醒出錯: {e}")
+
+@tasks.loop(minutes=1)
+async def check_raffle_ended():
+    """每分鐘檢查是否有抽獎需要執行"""
+    try:
+        now = datetime.now()
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+
+        # 查詢所有已結束且未執行抽獎的活動
+        c.execute('''SELECT raffle_id, channel_id, message_id, title, winners_count
+                     FROM raffles
+                     WHERE status = 'active' AND end_time <= ?''',
+                 (now.isoformat(),))
+        ended_raffles = c.fetchall()
+
+        for raffle_id, channel_id, message_id, title, winners_count in ended_raffles:
+            # 獲取所有報名者
+            c.execute('SELECT user_id, username FROM raffle_entries WHERE raffle_id = ? ORDER BY RANDOM()',
+                     (raffle_id,))
+            entries = c.fetchall()
+
+            if not entries:
+                # 沒有報名者，更新狀態
+                c.execute('UPDATE raffles SET status = ? WHERE raffle_id = ?', ('no_entries', raffle_id))
+                conn.commit()
+                continue
+
+            # 隨機抽取得獎者
+            selected_count = min(winners_count, len(entries))
+            winners = entries[:selected_count]
+
+            # 構建得獎者名單
+            winners_list = []
+            winners_mention = []
+            for user_id, username in winners:
+                winners_list.append(f"<@{user_id}> ({username})")
+                winners_mention.append(f"<@{user_id}>")
+
+            # 發布得獎名單
+            channel = bot.get_channel(channel_id)
+            if channel:
+                embed = discord.Embed(
+                    title=f"🎉 {title} - 抽獎結果",
+                    color=discord.Color.gold()
+                )
+                embed.add_field(
+                    name=f"得獎者 ({selected_count}/{winners_count})",
+                    value="\n".join(winners_list),
+                    inline=False
+                )
+                embed.add_field(
+                    name="總報名人數",
+                    value=f"{len(entries)} 人",
+                    inline=False
+                )
+
+                # 發送得獎訊息
+                mention_str = " ".join(winners_mention)
+                await channel.send(f"🎊 恭喜得獎者！{mention_str}", embed=embed)
+
+            # 更新狀態為已抽獎
+            c.execute('UPDATE raffles SET status = ? WHERE raffle_id = ?', ('drawn', raffle_id))
+            conn.commit()
+
+            print(f"[INFO] 抽獎 {raffle_id} ({title}) 已執行，得獎人數: {selected_count}")
+
+        conn.close()
+    except Exception as e:
+        print(f"[ERROR] 抽獎檢查出錯: {e}")
 
 @bot.tree.command(name="填寫拍賣行表單", description="填寫個人資訊")
 async def fill_form(interaction: Interaction):
@@ -765,6 +1069,19 @@ async def query_my_info(interaction: Interaction):
             ephemeral=True
         )
 
+@bot.tree.command(name="創建抽獎", description="創建新的抽獎活動（僅限管理員）")
+async def create_raffle(interaction: Interaction):
+    """創建抽獎活動（需要特定身份組）"""
+    # 檢查是否擁有指定身份組
+    if not any(role.id == REQUIRED_ROLE_ID for role in interaction.user.roles):
+        await interaction.response.send_message(
+            "[ERROR] 此指令僅限擁有特定身分組的成員使用",
+            ephemeral=True
+        )
+        return
+
+    await interaction.response.send_modal(RaffleForm())
+
 @bot.event
 async def on_message(message):
     """訊息事件處理"""
@@ -773,12 +1090,12 @@ async def on_message(message):
         return
 
     # 檢查是否提到關鍵詞「牢大」
-    ###if "牢大" in message.content:
-        ###await message.reply("Biubiu <@1288697154571075671> 不要殺我:sob:")
+    if "牢大" in message.content:
+        await message.reply("Biubiu <@1288697154571075671> 不要殺我:sob:")
 
     # 檢查是否提到關鍵詞「帕帕」
-    ###if "帕帕" in message.content:
-        ###await message.reply("<@472260409265487873>今天你又欠我們50塊錢，什麼原因自己想，有心者不用教無心者教不會")
+    if "帕帕" in message.content:
+        await message.reply("<@472260409265487873>今天你又欠我們50塊錢，什麼原因自己想，有心者不用教無心者教不會")
 
     # 繼續處理其他命令
     await bot.process_commands(message)
