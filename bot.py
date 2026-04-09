@@ -773,12 +773,12 @@ async def on_message(message):
         return
 
     # 檢查是否提到關鍵詞「牢大」
-    if "牢大" in message.content:
-        await message.reply("Biubiu <@1288697154571075671> 不要殺我:sob:")
+    #if "牢大" in message.content:
+        #await message.reply("Biubiu <@1288697154571075671> 不要殺我:sob:")
 
     # 檢查是否提到關鍵詞「帕帕」
-    if "帕帕" in message.content:
-        await message.reply("<@472260409265487873>今天你又欠我們50塊錢，什麼原因自己想，有心者不用教無心者教不會")
+    #if "帕帕" in message.content:
+        #await message.reply("<@472260409265487873>今天你又欠我們50塊錢，什麼原因自己想，有心者不用教無心者教不會")
 
     # 繼續處理其他命令
     await bot.process_commands(message)
