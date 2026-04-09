@@ -8,6 +8,8 @@ import sys
 import openpyxl
 import random
 
+# Discord Bot v2.0 - Raffle Feature Added
+
 # 設置 UTF-8 編碼支持
 if sys.platform == 'win32':
     import io
