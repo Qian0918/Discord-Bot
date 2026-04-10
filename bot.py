@@ -1240,7 +1240,7 @@ async def mist_mode(interaction: Interaction):
     # 發送開啟訊息和結束按鈕
     embed = discord.Embed(
         title="🌫️ 迷霧模式已開啟",
-        description="開啟迷霧模式～所以訊息將在五秒內刪除！直到模式結束",
+        description="開啟迷霧模式～所有訊息將在五秒內刪除！直到模式結束",
         color=discord.Color.purple(),
         timestamp=datetime.now(TZ_TAIPEI)
     )
