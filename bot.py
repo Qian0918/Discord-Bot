@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 import sys
 import openpyxl
 import random
+from zoneinfo import ZoneInfo
 
 # Discord Bot v2.0 - Raffle Feature Added
 
@@ -41,6 +42,12 @@ REMINDER_ROLE_ID = 1478704657512796292  # 定時提醒身份組
 # 頻道設置
 ANNOUNCEMENT_CHANNEL_ID = 1323970071869259806  # 每日報名名單公告頻道
 REMINDER_CHANNEL_ID = 1478705299845152768  # 定時提醒頻道
+
+# 台灣時區
+TZ_TAIPEI = ZoneInfo("Asia/Taipei")
+
+# 最後一次發送公告的日期（用於防止重複發送）
+last_announcement_date = None
 
 # 優先級用戶名列表
 def load_priority_usernames():
@@ -221,7 +228,7 @@ class EquipmentForm(discord.ui.Modal):
             c.execute('SELECT equip_days, created_at FROM users WHERE user_id = ?', (interaction.user.id,))
             existing = c.fetchone()
 
-            now = datetime.now()
+            now = datetime.now(TZ_TAIPEI)
             now_iso = now.isoformat()
 
             # 如果用戶已經存在，檢查他們的報名日期是否結束
@@ -341,7 +348,7 @@ class RaffleForm(discord.ui.Modal):
                 return
 
             # 計算結束時間
-            now = datetime.now()
+            now = datetime.now(TZ_TAIPEI)
             end_time = now + timedelta(days=days)
             end_time_iso = end_time.isoformat()
             now_iso = now.isoformat()
@@ -462,7 +469,7 @@ class RaffleButtonView(discord.ui.View):
             if raffle_info:
                 title, end_time, winners_count = raffle_info
                 end_time_obj = datetime.fromisoformat(end_time)
-                remaining = end_time_obj - datetime.now()
+                remaining = end_time_obj - datetime.now(TZ_TAIPEI)
 
                 embed = discord.Embed(
                     title=f"📊 {title} - 報名統計",
@@ -649,7 +656,7 @@ async def daily_reminder():
             return
 
         # 計算所有用戶的開始日期
-        tomorrow = (datetime.now() + timedelta(days=1)).date()
+        tomorrow = (datetime.now(TZ_TAIPEI) + timedelta(days=1)).date()
         users_starting_tomorrow = []
 
         current_start = None
@@ -680,10 +687,17 @@ async def daily_reminder():
 @tasks.loop(minutes=1)
 async def announcement_schedule():
     """每天晚上22:00發布當天的報名名單"""
+    global last_announcement_date
     try:
-        now = datetime.now()
+        # 使用台灣時區獲取當前時間
+        now = datetime.now(TZ_TAIPEI)
+        
         # 檢查是否是22:00~22:05分鐘之間
         if now.hour != 22 or now.minute > 5:
+            return
+        
+        # 檢查是否已在今天發送過（防止重複發送）
+        if last_announcement_date == now.date():
             return
 
         conn = sqlite3.connect(DB_PATH)
@@ -708,7 +722,7 @@ async def announcement_schedule():
         embed = discord.Embed(
             title="📋 今日報名名單 - 拍賣行排序",
             color=discord.Color.gold(),
-            timestamp=datetime.now()
+            timestamp=datetime.now(TZ_TAIPEI)
         )
 
         current_start = None
@@ -735,17 +749,18 @@ async def announcement_schedule():
 
         # 發送公告
         await channel.send(embed=embed)
+        last_announcement_date = now.date()
         print(f"[INFO] 已發送當日報名名單公告，共 {len(all_users)} 人")
 
     except Exception as e:
         print(f"[ERROR] 名單公告任務出錯: {e}")
 
 # 定時提醒系列任務
-@tasks.loop(hours=1)
+@tasks.loop(minutes=1)
 async def reminder_mon_wed_fri_12pm():
     """每週一、三、五 中午12點提醒"""
     try:
-        now = datetime.now()
+        now = datetime.now(TZ_TAIPEI)
         weekday = now.weekday()  # 0=Monday, 6=Sunday
 
         # 檢查是否是週一(0)、週三(2)、週五(4) 且是12:00~12:05分
@@ -759,11 +774,11 @@ async def reminder_mon_wed_fri_12pm():
     except Exception as e:
         print(f"[ERROR] 周一三五提醒出錯: {e}")
 
-@tasks.loop(hours=1)
+@tasks.loop(minutes=1)
 async def reminder_sat_11am():
     """每週六 早上11點提醒"""
     try:
-        now = datetime.now()
+        now = datetime.now(TZ_TAIPEI)
         weekday = now.weekday()  # 5=Saturday
 
         if weekday == 5 and now.hour == 11 and now.minute <= 5:
@@ -776,11 +791,11 @@ async def reminder_sat_11am():
     except Exception as e:
         print(f"[ERROR] 周六提醒出錯: {e}")
 
-@tasks.loop(hours=1)
+@tasks.loop(minutes=1)
 async def reminder_sun_8_55pm():
     """每週日 晚上8:55分提醒"""
     try:
-        now = datetime.now()
+        now = datetime.now(TZ_TAIPEI)
         weekday = now.weekday()  # 6=Sunday
 
         if weekday == 6 and now.hour == 20 and 55 <= now.minute <= 59:
@@ -793,11 +808,11 @@ async def reminder_sun_8_55pm():
     except Exception as e:
         print(f"[ERROR] 周日20:55提醒出錯: {e}")
 
-@tasks.loop(hours=1)
+@tasks.loop(minutes=1)
 async def reminder_sun_9_25pm():
     """每週日 晚上9:25分提醒"""
     try:
-        now = datetime.now()
+        now = datetime.now(TZ_TAIPEI)
         weekday = now.weekday()  # 6=Sunday
 
         if weekday == 6 and now.hour == 21 and 25 <= now.minute <= 29:
@@ -810,11 +825,11 @@ async def reminder_sun_9_25pm():
     except Exception as e:
         print(f"[ERROR] 周日21:25提醒出錯: {e}")
 
-@tasks.loop(hours=1)
+@tasks.loop(minutes=1)
 async def reminder_biweekly_thu_9_45pm():
     """每兩週的週四 晚上9:45分提醒（從2026年4月17日開始）"""
     try:
-        now = datetime.now()
+        now = datetime.now(TZ_TAIPEI)
         weekday = now.weekday()  # 3=Thursday
 
         if weekday == 3 and now.hour == 21 and 45 <= now.minute <= 49:
@@ -834,11 +849,11 @@ async def reminder_biweekly_thu_9_45pm():
     except Exception as e:
         print(f"[ERROR] 兩週提醒出錯: {e}")
 
-@tasks.loop(hours=1)
+@tasks.loop(minutes=1)
 async def reminder_wed_9pm():
     """每週三晚上九點提醒"""
     try:
-        now = datetime.now()
+        now = datetime.now(TZ_TAIPEI)
         weekday = now.weekday()  # 2=Wednesday
 
         if weekday == 2 and now.hour == 21 and now.minute <= 5:
@@ -855,7 +870,7 @@ async def reminder_wed_9pm():
 async def check_raffle_ended():
     """每分鐘檢查是否有抽獎需要執行"""
     try:
-        now = datetime.now()
+        now = datetime.now(TZ_TAIPEI)
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
 
@@ -969,7 +984,7 @@ async def query_equipment(interaction: Interaction):
         embed = discord.Embed(
             title="[STAT] 裝備收集統計",
             color=discord.Color.blue(),
-            timestamp=datetime.now()
+            timestamp=datetime.now(TZ_TAIPEI)
         )
 
         # 計算所有用戶的實際開始和結束日期
@@ -1044,7 +1059,7 @@ async def test_announcement(interaction: Interaction):
         embed = discord.Embed(
             title="📋 測試 - 今日報名名單 - 裝備收集排序",
             color=discord.Color.gold(),
-            timestamp=datetime.now()
+            timestamp=datetime.now(TZ_TAIPEI)
         )
 
         current_start = None
@@ -1123,14 +1138,14 @@ async def query_my_info(interaction: Interaction):
 
         conn.close()
 
-        # 檢查是否已過晚上10點（22點）
-        current_hour = datetime.now().hour
+        # 檢查是否已過晚上22點（22點）
+        current_hour = datetime.now(TZ_TAIPEI).hour
         is_after_10pm = current_hour >= 22
 
         embed = discord.Embed(
             title="你的表單信息",
             color=discord.Color.green(),
-            timestamp=datetime.now()
+            timestamp=datetime.now(TZ_TAIPEI)
         )
 
         if is_priority:
