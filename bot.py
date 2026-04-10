@@ -49,6 +49,10 @@ TZ_TAIPEI = ZoneInfo("Asia/Taipei")
 # 最後一次發送公告的日期（用於防止重複發送）
 last_announcement_date = None
 
+# 迷霧模式狀態
+mist_mode_enabled = False
+mist_mode_channel_id = None
+
 # 優先級用戶名列表
 def load_priority_usernames():
     """從 id.xlsx 讀取優先級用戶名"""
@@ -1190,12 +1194,88 @@ async def create_raffle(interaction: Interaction):
 
     await interaction.response.send_modal(RaffleForm())
 
+# 迷霧模式結束按鈕
+class MistModeEndButton(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="結束迷霧模式", style=discord.ButtonStyle.red)
+    async def end_mist_mode(self, interaction: Interaction, button: discord.ui.Button):
+        """結束迷霧模式"""
+        global mist_mode_enabled, mist_mode_channel_id
+        
+        # 檢查是否為管理員
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message(
+                "[ERROR] 只有管理員可以結束迷霧模式",
+                ephemeral=True
+            )
+            return
+        
+        mist_mode_enabled = False
+        mist_mode_channel_id = None
+        
+        await interaction.response.send_message(
+            "✅ 迷霧模式已結束！",
+            ephemeral=True
+        )
+        print("[INFO] 迷霧模式已關閉")
+
+@bot.tree.command(name="迷霧模式", description="開啟迷霧模式（管理員限定）")
+async def mist_mode(interaction: Interaction):
+    """開啟迷霧模式"""
+    global mist_mode_enabled, mist_mode_channel_id
+    
+    # 檢查是否為管理員
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message(
+            "[ERROR] 此指令僅限管理員使用",
+            ephemeral=True
+        )
+        return
+    
+    mist_mode_enabled = True
+    mist_mode_channel_id = interaction.channel_id
+    
+    # 發送開啟訊息和結束按鈕
+    embed = discord.Embed(
+        title="🌫️ 迷霧模式已開啟",
+        description="開啟迷霧模式～所以訊息將在五秒內刪除！直到模式結束",
+        color=discord.Color.purple(),
+        timestamp=datetime.now(TZ_TAIPEI)
+    )
+    embed.add_field(
+        name="⚙️ 說明",
+        value="所有在此頻道發送的訊息將在5秒後自動刪除",
+        inline=False
+    )
+    
+    await interaction.response.send_message(
+        embed=embed,
+        view=MistModeEndButton()
+    )
+    
+    print(f"[INFO] 迷霧模式已開啟，頻道 ID: {interaction.channel_id}")
+
 @bot.event
 async def on_message(message):
     """訊息事件處理"""
     # 忽略機器人自己的訊息
     if message.author.bot:
         return
+    
+    # 迷霧模式處理
+    global mist_mode_enabled, mist_mode_channel_id
+    
+    if mist_mode_enabled and message.channel.id == mist_mode_channel_id:
+        try:
+            # 5秒後刪除訊息
+            await message.delete(delay=5)
+            print(f"[INFO] 迷霧模式：已排隊刪除訊息 from {message.author.name}")
+        except discord.Forbidden:
+            print(f"[ERROR] 迷霧模式：沒有權限刪除訊息")
+        except Exception as e:
+            print(f"[ERROR] 迷霧模式刪除訊息錯誤: {e}")
 
     # 繼續處理其他命令
     await bot.process_commands(message)
