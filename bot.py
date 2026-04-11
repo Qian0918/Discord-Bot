@@ -56,6 +56,7 @@ last_reminder_sun_8_55pm_date = None
 last_reminder_sun_9_25pm_date = None
 last_reminder_biweekly_thu_9_45pm_date = None
 last_reminder_wed_9pm_date = None
+last_reminder_equip_date = None
 
 # 迷霧模式狀態
 mist_mode_enabled = False
@@ -650,10 +651,21 @@ async def on_ready():
         import traceback
         traceback.print_exc()
 
-@tasks.loop(hours=1)
+@tasks.loop(minutes=1)
 async def daily_reminder():
-    """每小時檢查一次是否有人明天要開始收裝備"""
+    """每天晚上22:10提醒明天要開始收裝備的人"""
+    global last_reminder_equip_date
     try:
+        now = datetime.now(TZ_TAIPEI)
+        
+        # 檢查是否是22:10
+        if now.hour != 22 or now.minute != 10:
+            return
+        
+        # 檢查是否已在今天發送過（防止重複發送）
+        if last_reminder_equip_date == now.date():
+            return
+
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
 
@@ -689,10 +701,12 @@ async def daily_reminder():
         if users_starting_tomorrow:
             channel = bot.get_channel(ANNOUNCEMENT_CHANNEL_ID)
             if channel:
-                mentions = " ".join([f"<@{user_id}>" for user_id, _ in users_starting_tomorrow])
-                message = f"📢 明天可以開始收取裝備了！\n\n{mentions} 明天就可以收取裝備，敬請期待！"
-                await channel.send(message)
+                for user_id, username in users_starting_tomorrow:
+                    message = f"<@{user_id}> 可以開始收裝備啦～"
+                    await channel.send(message)
                 print(f"[INFO] 已發送明日收裝備提醒: {[username for _, username in users_starting_tomorrow]}")
+            
+            last_reminder_equip_date = now.date()
     except Exception as e:
         print(f"[ERROR] 定時提醒任務出錯: {e}")
 
