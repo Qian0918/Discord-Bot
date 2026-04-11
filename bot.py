@@ -49,6 +49,14 @@ TZ_TAIPEI = ZoneInfo("Asia/Taipei")
 # 最後一次發送公告的日期（用於防止重複發送）
 last_announcement_date = None
 
+# 定時提醒狀態追蹤（防止重複發送）
+last_reminder_mon_wed_fri_12pm_date = None
+last_reminder_sat_11am_date = None
+last_reminder_sun_8_55pm_date = None
+last_reminder_sun_9_25pm_date = None
+last_reminder_biweekly_thu_9_45pm_date = None
+last_reminder_wed_9pm_date = None
+
 # 迷霧模式狀態
 mist_mode_enabled = False
 mist_mode_channel_id = None
@@ -763,17 +771,23 @@ async def announcement_schedule():
 @tasks.loop(minutes=1)
 async def reminder_mon_wed_fri_12pm():
     """每週一、三、五 中午12點提醒"""
+    global last_reminder_mon_wed_fri_12pm_date
     try:
         now = datetime.now(TZ_TAIPEI)
         weekday = now.weekday()  # 0=Monday, 6=Sunday
 
-        # 檢查是否是週一(0)、週三(2)、週五(4) 且是12:00~12:05分
-        if weekday in [0, 2, 4] and now.hour == 12 and now.minute <= 5:
+        # 檢查是否是週一(0)、週三(2)、週五(4) 且是12:00點
+        if weekday in [0, 2, 4] and now.hour == 12 and now.minute == 0:
+            # 檢查是否已在今天發送過
+            if last_reminder_mon_wed_fri_12pm_date == now.date():
+                return
+            
             channel = bot.get_channel(REMINDER_CHANNEL_ID)
             if channel:
                 role_mention = f"<@&{REMINDER_ROLE_ID}>"
                 message = f"{role_mention} 大家今天記得鎮魔呦～"
                 await channel.send(message)
+                last_reminder_mon_wed_fri_12pm_date = now.date()
                 print(f"[INFO] 已發送週一/三/五中午提醒")
     except Exception as e:
         print(f"[ERROR] 周一三五提醒出錯: {e}")
@@ -781,16 +795,22 @@ async def reminder_mon_wed_fri_12pm():
 @tasks.loop(minutes=1)
 async def reminder_sat_11am():
     """每週六 早上11點提醒"""
+    global last_reminder_sat_11am_date
     try:
         now = datetime.now(TZ_TAIPEI)
         weekday = now.weekday()  # 5=Saturday
 
-        if weekday == 5 and now.hour == 11 and now.minute <= 5:
+        if weekday == 5 and now.hour == 11 and now.minute == 0:
+            # 檢查是否已在今天發送過
+            if last_reminder_sat_11am_date == now.date():
+                return
+            
             channel = bot.get_channel(REMINDER_CHANNEL_ID)
             if channel:
                 role_mention = f"<@&{REMINDER_ROLE_ID}>"
                 message = f"{role_mention} 今晚9點有宗門亂鬥～記得報名參加"
                 await channel.send(message)
+                last_reminder_sat_11am_date = now.date()
                 print(f"[INFO] 已發送週六早上提醒")
     except Exception as e:
         print(f"[ERROR] 周六提醒出錯: {e}")
@@ -798,16 +818,22 @@ async def reminder_sat_11am():
 @tasks.loop(minutes=1)
 async def reminder_sun_8_55pm():
     """每週日 晚上8:55分提醒"""
+    global last_reminder_sun_8_55pm_date
     try:
         now = datetime.now(TZ_TAIPEI)
         weekday = now.weekday()  # 6=Sunday
 
-        if weekday == 6 and now.hour == 20 and 55 <= now.minute <= 59:
+        if weekday == 6 and now.hour == 20 and now.minute == 55:
+            # 檢查是否已在今天發送過
+            if last_reminder_sun_8_55pm_date == now.date():
+                return
+            
             channel = bot.get_channel(REMINDER_CHANNEL_ID)
             if channel:
                 role_mention = f"<@&{REMINDER_ROLE_ID}>"
                 message = f"{role_mention} 八荒要開始啦！大家速速上線"
                 await channel.send(message)
+                last_reminder_sun_8_55pm_date = now.date()
                 print(f"[INFO] 已發送週日20:55提醒")
     except Exception as e:
         print(f"[ERROR] 周日20:55提醒出錯: {e}")
@@ -815,16 +841,22 @@ async def reminder_sun_8_55pm():
 @tasks.loop(minutes=1)
 async def reminder_sun_9_25pm():
     """每週日 晚上9:25分提醒"""
+    global last_reminder_sun_9_25pm_date
     try:
         now = datetime.now(TZ_TAIPEI)
         weekday = now.weekday()  # 6=Sunday
 
-        if weekday == 6 and now.hour == 21 and 25 <= now.minute <= 29:
+        if weekday == 6 and now.hour == 21 and now.minute == 25:
+            # 檢查是否已在今天發送過
+            if last_reminder_sun_9_25pm_date == now.date():
+                return
+            
             channel = bot.get_channel(REMINDER_CHANNEL_ID)
             if channel:
                 role_mention = f"<@&{REMINDER_ROLE_ID}>"
                 message = f"{role_mention} 天下要開打了！上線集合集合"
                 await channel.send(message)
+                last_reminder_sun_9_25pm_date = now.date()
                 print(f"[INFO] 已發送週日21:25提醒")
     except Exception as e:
         print(f"[ERROR] 周日21:25提醒出錯: {e}")
@@ -832,11 +864,12 @@ async def reminder_sun_9_25pm():
 @tasks.loop(minutes=1)
 async def reminder_biweekly_thu_9_45pm():
     """每兩週的週四 晚上9:45分提醒（從2026年4月17日開始）"""
+    global last_reminder_biweekly_thu_9_45pm_date
     try:
         now = datetime.now(TZ_TAIPEI)
         weekday = now.weekday()  # 3=Thursday
 
-        if weekday == 3 and now.hour == 21 and 45 <= now.minute <= 49:
+        if weekday == 3 and now.hour == 21 and now.minute == 45:
             # 計算距離基準日期 2026-04-17 的天數
             base_date = datetime(2026, 4, 17).date()
             current_date = now.date()
@@ -844,11 +877,16 @@ async def reminder_biweekly_thu_9_45pm():
 
             # 如果是基準日期的倍數個14天（偶數週）
             if days_diff >= 0 and days_diff % 14 == 0:
+                # 檢查是否已在今天發送過
+                if last_reminder_biweekly_thu_9_45pm_date == now.date():
+                    return
+                
                 channel = bot.get_channel(REMINDER_CHANNEL_ID)
                 if channel:
                     role_mention = f"<@&{REMINDER_ROLE_ID}>"
                     message = f"{role_mention} 仙魔訣要結算啦！記得上線ko對手～"
                     await channel.send(message)
+                    last_reminder_biweekly_thu_9_45pm_date = now.date()
                     print(f"[INFO] 已發送兩週一次的週四21:45提醒")
     except Exception as e:
         print(f"[ERROR] 兩週提醒出錯: {e}")
@@ -856,16 +894,22 @@ async def reminder_biweekly_thu_9_45pm():
 @tasks.loop(minutes=1)
 async def reminder_wed_9pm():
     """每週三晚上九點提醒"""
+    global last_reminder_wed_9pm_date
     try:
         now = datetime.now(TZ_TAIPEI)
         weekday = now.weekday()  # 2=Wednesday
 
-        if weekday == 2 and now.hour == 21 and now.minute <= 5:
+        if weekday == 2 and now.hour == 21 and now.minute == 0:
+            # 檢查是否已在今天發送過
+            if last_reminder_wed_9pm_date == now.date():
+                return
+            
             channel = bot.get_channel(REMINDER_CHANNEL_ID)
             if channel:
                 role_mention = f"<@&{REMINDER_ROLE_ID}>"
                 message = f"{role_mention} 宗門對決要結束了！還有次數的成員記得打呦"
                 await channel.send(message)
+                last_reminder_wed_9pm_date = now.date()
                 print(f"[INFO] 已發送週三晚上提醒")
     except Exception as e:
         print(f"[ERROR] 周三晚上提醒出錯: {e}")
