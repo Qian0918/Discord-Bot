@@ -1279,6 +1279,57 @@ class MistModeEndButton(discord.ui.View):
         )
         print("[INFO] 迷霧模式已關閉")
 
+@bot.tree.command(name="清除用戶數據", description="清除所有報名拍賣行的人員資料（管理員限定）")
+async def clear_user_data(interaction: Interaction):
+    """清除所有用戶的報名信息（管理員限定）"""
+    try:
+        # 檢查是否為管理員
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message(
+                "[ERROR] 此指令僅限管理員使用",
+                ephemeral=True
+            )
+            return
+
+        # 先延遲回應，然後確認操作
+        await interaction.response.defer(ephemeral=True)
+
+        # 連接數據庫並清除所有用戶數據
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+
+        # 獲取現有用戶數量
+        c.execute('SELECT COUNT(*) FROM users')
+        user_count = c.fetchone()[0]
+
+        # 清除所有用戶數據
+        c.execute('DELETE FROM users')
+        conn.commit()
+        conn.close()
+
+        # 發送確認訊息
+        embed = discord.Embed(
+            title="✅ 清除完成",
+            description=f"已清除 {user_count} 個用戶的報名數據",
+            color=discord.Color.green(),
+            timestamp=datetime.now(TZ_TAIPEI)
+        )
+        embed.add_field(
+            name="⚠️ 警告",
+            value="此操作無法撤銷，所有用戶的報名信息已被永久刪除",
+            inline=False
+        )
+
+        await interaction.followup.send(embed=embed, ephemeral=True)
+        print(f"[INFO] 管理員 {interaction.user.name} 清除了所有用戶數據，共 {user_count} 個用戶")
+
+    except Exception as e:
+        print(f"[ERROR] 清除用戶數據失敗: {type(e).__name__}: {str(e)}")
+        await interaction.followup.send(
+            f"[ERROR] 清除失敗: {str(e)}",
+            ephemeral=True
+        )
+
 @bot.tree.command(name="迷霧模式", description="開啟迷霧模式（管理員限定）")
 async def mist_mode(interaction: Interaction):
     """開啟迷霧模式"""
