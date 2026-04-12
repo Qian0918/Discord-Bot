@@ -774,7 +774,7 @@ async def announcement_schedule():
         embed.set_footer(text=f"總共 {len(all_users)} 個報名用戶")
 
         # 發送公告
-        await channel.send(embed=embed)
+        await channel.send(embed=embed, view=CancelSignupView())
         last_announcement_date = now.date()
         print(f"[INFO] 已發送當日報名名單公告，共 {len(all_users)} 人")
 
@@ -1073,7 +1073,7 @@ async def query_equipment(interaction: Interaction):
 
         embed.set_footer(text=f"總共 {len(all_users)} 個用戶")
 
-        await interaction.response.send_message(embed=embed, ephemeral=False)
+        await interaction.response.send_message(embed=embed, view=CancelSignupView(), ephemeral=False)
     except Exception as e:
         await interaction.response.send_message(
             f"[ERROR] 查詢失敗: {str(e)}",
@@ -1146,7 +1146,7 @@ async def test_announcement(interaction: Interaction):
         embed.set_footer(text=f"測試公告 | 總共 {len(all_users)} 個報名用戶 | ✨ 表示優先級用戶")
 
         # 發送公告
-        await channel.send(embed=embed)
+        await channel.send(embed=embed, view=CancelSignupView())
 
         # 發送明日提醒（@第一個人）
         if all_users:
@@ -1251,6 +1251,57 @@ async def create_raffle(interaction: Interaction):
         return
 
     await interaction.response.send_modal(RaffleForm())
+
+# 取消報名按鈕視圖
+class CancelSignupView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="❌ 取消我的報名", style=discord.ButtonStyle.red)
+    async def cancel_signup(self, interaction: Interaction, button: discord.ui.Button):
+        """取消用戶報名"""
+        try:
+            await interaction.response.defer(ephemeral=True)
+            
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+            
+            # 檢查用戶是否存在
+            c.execute('SELECT username, equip_days FROM users WHERE user_id = ?', 
+                     (interaction.user.id,))
+            user_result = c.fetchone()
+            
+            if not user_result:
+                await interaction.followup.send(
+                    "[ERROR] 找不到你的報名信息",
+                    ephemeral=True
+                )
+                conn.close()
+                return
+            
+            username, equip_days = user_result
+            
+            # 刪除用戶報名信息
+            c.execute('DELETE FROM users WHERE user_id = ?', (interaction.user.id,))
+            conn.commit()
+            conn.close()
+            
+            # 發送確認訊息
+            await interaction.followup.send(
+                f"✅ 已取消你的報名！\n"
+                f"用戶名: {username}\n"
+                f"收裝備天數: {equip_days} 天\n\n"
+                f"在你之後的報名者會自動替補往前！",
+                ephemeral=True
+            )
+            
+            print(f"[INFO] 用戶 {username} (ID: {interaction.user.id}) 已取消報名")
+        except Exception as e:
+            print(f"[ERROR] 取消報名出錯: {e}")
+            await interaction.followup.send(
+                f"[ERROR] 取消報名失敗: {str(e)}",
+                ephemeral=True
+            )
 
 # 迷霧模式結束按鈕
 class MistModeEndButton(discord.ui.View):
