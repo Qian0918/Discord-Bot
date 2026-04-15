@@ -94,13 +94,21 @@ def init_database():
         equip_days INTEGER NOT NULL,
         max_fate_cost INTEGER NOT NULL,
         is_priority INTEGER DEFAULT 0,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        queue_priority INTEGER DEFAULT 0
     )''')
 
     # 添加 is_priority 列如果不存在
     try:
         c.execute('ALTER TABLE users ADD COLUMN is_priority INTEGER DEFAULT 0')
         print("[INFO] 已添加 is_priority 列")
+    except sqlite3.OperationalError:
+        pass  # 列已存在
+    
+    # 添加 queue_priority 列用於控制優先級用戶插隊
+    try:
+        c.execute('ALTER TABLE users ADD COLUMN queue_priority INTEGER DEFAULT 0')
+        print("[INFO] 已添加 queue_priority 列用於優先級用戶插隊控制")
     except sqlite3.OperationalError:
         pass  # 列已存在
 
@@ -144,10 +152,17 @@ def get_actual_dates(user_id):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
 
-    # 獲取所有用戶，按優先級和時間排序
-    c.execute('''SELECT user_id, equip_days, created_at
+    # 獲取所有用戶，按優先級、隊列優先級和時間排序
+    # queue_priority=1的用戶排在最前面（在優先級用戶之中）
+    c.execute('''SELECT user_id, equip_days, created_at, queue_priority
                  FROM users
-                 ORDER BY is_priority DESC, created_at ASC''')
+                 ORDER BY 
+                   CASE 
+                     WHEN queue_priority = 1 AND is_priority = 1 THEN 0
+                     ELSE 1
+                   END,
+                   is_priority DESC, 
+                   created_at ASC''')
     all_users = c.fetchall()
 
     # 查詢目標用戶的信息
@@ -162,7 +177,7 @@ def get_actual_dates(user_id):
 
     # 計算實際日期
     current_start = None
-    for uid, equip_days, created_at in all_users:
+    for uid, equip_days, created_at, queue_priority in all_users:
         if current_start is None:
             current_start = datetime.fromisoformat(created_at)
 
@@ -174,6 +189,40 @@ def get_actual_dates(user_id):
         current_start = current_start + timedelta(days=equip_days) + timedelta(days=1)
 
     return None, None
+
+def get_current_executing_user():
+    """獲取當前正在收裝備的用戶ID（基於計算得出的開始/結束日期）"""
+    from datetime import timedelta
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    # 獲取所有用戶，按優先級和隊列優先級排序
+    c.execute('''SELECT user_id, equip_days, created_at, queue_priority
+                 FROM users
+                 ORDER BY 
+                   CASE 
+                     WHEN queue_priority = 1 AND is_priority = 1 THEN 0
+                     ELSE 1
+                   END,
+                   is_priority DESC, 
+                   created_at ASC''')
+    all_users = c.fetchall()
+    conn.close()
+
+    if not all_users:
+        return None
+
+    # 計算第一個用戶的開始和結束日期
+    current_start = datetime.fromisoformat(all_users[0][2])
+    current_end = current_start + timedelta(days=all_users[0][1])
+    
+    now = datetime.now(TZ_TAIPEI)
+    
+    # 檢查第一個用戶是否在進行中
+    if current_start.replace(hour=0, minute=0, second=0, microsecond=0) <= now.replace(hour=0, minute=0, second=0, microsecond=0) <= current_end.replace(hour=23, minute=59, second=59):
+        return all_users[0][0]  # 返回用戶ID
+    
+    return None
 
 class EquipmentForm(discord.ui.Modal):
     """拍賣行信息表單"""
@@ -232,6 +281,15 @@ class EquipmentForm(discord.ui.Modal):
 
             # 檢查是否為優先級用戶
             is_priority = 1 if interaction.user.name in PRIORITY_USERNAMES else 0
+            
+            # 判斷是否需要優先級插隊
+            queue_priority = 0
+            if is_priority == 1:
+                # 檢查是否有人正在收裝備
+                current_user_id = get_current_executing_user()
+                if current_user_id is not None and current_user_id != interaction.user.id:
+                    # 有其他人正在進行中，新的優先級用戶應該排在第二順位
+                    queue_priority = 1
 
             # 保存到數據庫
             conn = sqlite3.connect(DB_PATH)
@@ -269,18 +327,22 @@ class EquipmentForm(discord.ui.Modal):
 
             # 創建新記錄（無論是新用戶還是舊報名已結束的用戶）
             c.execute('''INSERT INTO users
-                (user_id, username, game_name, equip_days, max_fate_cost, is_priority, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)''',
+                (user_id, username, game_name, equip_days, max_fate_cost, is_priority, created_at, queue_priority)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
                 (interaction.user.id, interaction.user.name,
-                 self.game_name.value, equip_days, max_fate_cost, is_priority, now_iso))
+                 self.game_name.value, equip_days, max_fate_cost, is_priority, now_iso, queue_priority))
 
             conn.commit()
             conn.close()
 
             # 回應用戶（僅用戶可見）
             priority_text = "✨ [優先級用戶]" if is_priority else ""
+            queue_status = ""
+            if queue_priority == 1:
+                queue_status = "\n\n🔔 [特別提醒] 由於你是優先級用戶且當前有人在收裝備，你已加入優先隊列，將排在第二順位！"
+            
             await interaction.followup.send(
-                f"[OK] 信息已保存! {priority_text}\n\n"
+                f"[OK] 信息已保存! {priority_text}{queue_status}\n\n"
                 f"遊戲名稱: {self.game_name.value}\n"
                 f"收裝備天數: {equip_days} 天\n"
                 f"最高天命花費: {max_fate_cost}\n\n"
@@ -669,10 +731,16 @@ async def daily_reminder():
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
 
-        # 獲取所有用戶，按優先級和時間排序
-        c.execute('''SELECT user_id, username, equip_days, created_at, is_priority
+        # 獲取所有用戶，按優先級、隊列優先級和時間排序
+        c.execute('''SELECT user_id, username, equip_days, created_at, is_priority, queue_priority
                      FROM users
-                     ORDER BY is_priority DESC, created_at ASC''')
+                     ORDER BY 
+                       CASE 
+                         WHEN queue_priority = 1 AND is_priority = 1 THEN 0
+                         ELSE 1
+                       END,
+                       is_priority DESC, 
+                       created_at ASC''')
         all_users = c.fetchall()
         conn.close()
 
@@ -684,7 +752,7 @@ async def daily_reminder():
         users_starting_tomorrow = []
 
         current_start = None
-        for user_id, username, equip_days, created_at, is_priority in all_users:
+        for user_id, username, equip_days, created_at, is_priority, queue_priority in all_users:
             if current_start is None:
                 current_start = datetime.fromisoformat(created_at)
 
@@ -729,10 +797,16 @@ async def announcement_schedule():
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
 
-        # 獲取所有用戶，按優先級和時間排序
-        c.execute('''SELECT username, game_name, equip_days, created_at, is_priority, user_id
+        # 獲取所有用戶，按優先級、隊列優先級和時間排序
+        c.execute('''SELECT username, game_name, equip_days, created_at, is_priority, user_id, queue_priority
                      FROM users
-                     ORDER BY is_priority DESC, created_at ASC''')
+                     ORDER BY 
+                       CASE 
+                         WHEN queue_priority = 1 AND is_priority = 1 THEN 0
+                         ELSE 1
+                       END,
+                       is_priority DESC, 
+                       created_at ASC''')
         all_users = c.fetchall()
         conn.close()
 
@@ -752,7 +826,7 @@ async def announcement_schedule():
         )
 
         current_start = None
-        for i, (username, game_name, equip_days, created_at, is_priority, user_id) in enumerate(all_users, 1):
+        for i, (username, game_name, equip_days, created_at, is_priority, user_id, queue_priority) in enumerate(all_users, 1):
             if current_start is None:
                 current_start = datetime.fromisoformat(created_at)
 
@@ -762,16 +836,17 @@ async def announcement_schedule():
             end_str = end_date.strftime("%m月%d號")
 
             priority_badge = "✨" if is_priority else ""
+            queue_badge = "📍" if queue_priority == 1 else ""  # 標記優先級插隊用戶
             user_mention = f"<@{user_id}>"
             embed.add_field(
-                name=f"#{i} {priority_badge} {username}",
+                name=f"#{i} {priority_badge}{queue_badge} {username}",
                 value=f"遊戲名稱: {game_name}\n開始日期: {start_str}\n收裝備天數: {equip_days} 天\n結束日期: {end_str}",
                 inline=False
             )
 
             current_start = end_date + timedelta(days=1)
 
-        embed.set_footer(text=f"總共 {len(all_users)} 個報名用戶")
+        embed.set_footer(text=f"總共 {len(all_users)} 個報名用戶 | ✨ 優先級用戶 | 📍 優先隊列用戶")
 
         # 發送公告
         await channel.send(embed=embed, view=CancelSignupView())
@@ -1028,10 +1103,16 @@ async def query_equipment(interaction: Interaction):
 
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
-        # 按優先級和提交時間排序（優先級用戶在前，同級按時間排序）
-        c.execute('''SELECT username, game_name, equip_days, created_at, is_priority
+        # 按優先級、隊列優先級和提交時間排序
+        c.execute('''SELECT username, game_name, equip_days, created_at, is_priority, queue_priority
                      FROM users
-                     ORDER BY is_priority DESC, created_at ASC''')
+                     ORDER BY 
+                       CASE 
+                         WHEN queue_priority = 1 AND is_priority = 1 THEN 0
+                         ELSE 1
+                       END,
+                       is_priority DESC, 
+                       created_at ASC''')
         all_users = c.fetchall()
         conn.close()
 
@@ -1051,7 +1132,7 @@ async def query_equipment(interaction: Interaction):
 
         # 計算所有用戶的實際開始和結束日期
         current_start = None
-        for i, (username, game_name, equip_days, created_at, is_priority) in enumerate(all_users, 1):
+        for i, (username, game_name, equip_days, created_at, is_priority, queue_priority) in enumerate(all_users, 1):
             if current_start is None:
                 # 第一個用戶的開始日期是他的填寫日期
                 current_start = datetime.fromisoformat(created_at)
@@ -1062,8 +1143,9 @@ async def query_equipment(interaction: Interaction):
             end_str = end_date.strftime("%m月%d號")
 
             priority_badge = "✨" if is_priority else ""
+            queue_badge = "📍" if queue_priority == 1 else ""
             embed.add_field(
-                name=f"#{i} {priority_badge} {username}",
+                name=f"#{i} {priority_badge}{queue_badge} {username}",
                 value=f"遊戲名稱: {game_name}\n開始日期: {start_str}\n收裝備天數: {equip_days} 天\n結束日期: {end_str}",
                 inline=False
             )
@@ -1071,7 +1153,7 @@ async def query_equipment(interaction: Interaction):
             # 下一個用戶的開始日期是當前用戶結束日期的下一天
             current_start = end_date + timedelta(days=1)
 
-        embed.set_footer(text=f"總共 {len(all_users)} 個用戶")
+        embed.set_footer(text=f"總共 {len(all_users)} 個用戶 | ✨ 優先級用戶 | 📍 優先隊列用戶")
 
         await interaction.response.send_message(embed=embed, view=CancelSignupView(), ephemeral=False)
     except Exception as e:
@@ -1095,10 +1177,16 @@ async def test_announcement(interaction: Interaction):
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
 
-        # 獲取所有用戶，按優先級和時間排序
-        c.execute('''SELECT username, game_name, equip_days, created_at, is_priority, user_id
+        # 獲取所有用戶，按優先級、隊列優先級和時間排序
+        c.execute('''SELECT username, game_name, equip_days, created_at, is_priority, user_id, queue_priority
                      FROM users
-                     ORDER BY is_priority DESC, created_at ASC''')
+                     ORDER BY 
+                       CASE 
+                         WHEN queue_priority = 1 AND is_priority = 1 THEN 0
+                         ELSE 1
+                       END,
+                       is_priority DESC, 
+                       created_at ASC''')
         all_users = c.fetchall()
         conn.close()
 
@@ -1125,7 +1213,7 @@ async def test_announcement(interaction: Interaction):
         )
 
         current_start = None
-        for i, (username, game_name, equip_days, created_at, is_priority, user_id) in enumerate(all_users, 1):
+        for i, (username, game_name, equip_days, created_at, is_priority, user_id, queue_priority) in enumerate(all_users, 1):
             if current_start is None:
                 current_start = datetime.fromisoformat(created_at)
 
@@ -1135,15 +1223,16 @@ async def test_announcement(interaction: Interaction):
             end_str = end_date.strftime("%m月%d號")
 
             priority_badge = "✨" if is_priority else ""
+            queue_badge = "📍" if queue_priority == 1 else ""
             embed.add_field(
-                name=f"#{i} {priority_badge} {username}",
+                name=f"#{i} {priority_badge}{queue_badge} {username}",
                 value=f"遊戲名稱: {game_name}\n開始日期: {start_str}\n收裝備天數: {equip_days} 天\n結束日期: {end_str}",
                 inline=False
             )
 
             current_start = end_date + timedelta(days=1)
 
-        embed.set_footer(text=f"測試公告 | 總共 {len(all_users)} 個報名用戶 | ✨ 表示優先級用戶")
+        embed.set_footer(text=f"測試公告 | 總共 {len(all_users)} 個報名用戶 | ✨ 優先級用戶 | 📍 優先隊列用戶")
 
         # 發送公告
         await channel.send(embed=embed, view=CancelSignupView())
@@ -1178,7 +1267,7 @@ async def query_my_info(interaction: Interaction):
 
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
-        c.execute('SELECT created_at, game_name, equip_days, max_fate_cost, is_priority FROM users WHERE user_id = ?',
+        c.execute('SELECT created_at, game_name, equip_days, max_fate_cost, is_priority, queue_priority FROM users WHERE user_id = ?',
                   (interaction.user.id,))
         result = c.fetchone()
 
@@ -1190,7 +1279,7 @@ async def query_my_info(interaction: Interaction):
             conn.close()
             return
 
-        created_at, game_name, equip_days, max_fate_cost, is_priority = result
+        created_at, game_name, equip_days, max_fate_cost, is_priority, queue_priority = result
 
         # 獲取排隊位置
         c.execute('''SELECT COUNT(*) FROM users
@@ -1212,6 +1301,9 @@ async def query_my_info(interaction: Interaction):
 
         if is_priority:
             embed.add_field(name="身份", value="✨ 優先級用戶", inline=False)
+        
+        if queue_priority == 1:
+            embed.add_field(name="隊列狀態", value="📍 優先隊列 (已插隊至第二順位)", inline=False)
 
         if is_after_10pm:
             # 晚上10點後顯示完整信息
