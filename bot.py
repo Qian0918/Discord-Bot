@@ -179,7 +179,13 @@ def get_actual_dates(user_id):
     current_start = None
     for uid, equip_days, created_at, queue_priority in all_users:
         if current_start is None:
-            current_start = datetime.fromisoformat(created_at)
+            try:
+                current_start = datetime.fromisoformat(created_at)
+                # 如果是offset-naive的，添加時區信息
+                if current_start.tzinfo is None:
+                    current_start = current_start.replace(tzinfo=TZ_TAIPEI)
+            except:
+                return None, None
 
         if uid == user_id:
             end_date = current_start + timedelta(days=user_equip_days)
@@ -213,7 +219,14 @@ def get_current_executing_user():
         return None
 
     # 計算第一個用戶的開始和結束日期
-    current_start = datetime.fromisoformat(all_users[0][2])
+    try:
+        current_start = datetime.fromisoformat(all_users[0][2])
+        # 如果是offset-naive的，添加時區信息
+        if current_start.tzinfo is None:
+            current_start = current_start.replace(tzinfo=TZ_TAIPEI)
+    except:
+        return None
+    
     current_end = current_start + timedelta(days=all_users[0][1])
     
     now = datetime.now(TZ_TAIPEI)
@@ -306,24 +319,39 @@ class EquipmentForm(discord.ui.Modal):
             if existing:
                 old_equip_days, created_at = existing
                 # 計算舊的結束日期
-                start_date = datetime.fromisoformat(created_at)
-                end_date = start_date + timedelta(days=old_equip_days)
+                try:
+                    start_date = datetime.fromisoformat(created_at)
+                    # 如果是offset-naive的，添加時區信息
+                    if start_date.tzinfo is None:
+                        start_date = start_date.replace(tzinfo=TZ_TAIPEI)
+                except:
+                    # 如果解析失敗，刪除舊記錄
+                    c.execute('DELETE FROM users WHERE user_id = ?', (interaction.user.id,))
+                    conn.commit()
+                    # 繼續創建新記錄
+                    start_date = None
+                
+                if start_date:
+                    end_date = start_date + timedelta(days=old_equip_days)
 
-                # 檢查是否還在報名期間內（或尚未開始）
-                if now < end_date.replace(hour=23, minute=59, second=59):
-                    # 報名還沒結束
-                    remaining_days = (end_date.date() - now.date()).days + 1
-                    await interaction.followup.send(
-                        f"[ERROR] 你已經有一個活動中的報名！\n"
-                        f"預計結束日期: {end_date.strftime('%m月%d號')}\n"
-                        f"請等待報名結束後再重新報名 (還有約 {remaining_days} 天)",
-                        ephemeral=True
-                    )
-                    conn.close()
-                    return
+                    # 檢查是否還在報名期間內（或尚未開始）
+                    if now < end_date.replace(hour=23, minute=59, second=59):
+                        # 報名還沒結束
+                        remaining_days = (end_date.date() - now.date()).days + 1
+                        await interaction.followup.send(
+                            f"[ERROR] 你已經有一個活動中的報名！\n"
+                            f"預計結束日期: {end_date.strftime('%m月%d號')}\n"
+                            f"請等待報名結束後再重新報名 (還有約 {remaining_days} 天)",
+                            ephemeral=True
+                        )
+                        conn.close()
+                        return
 
-                # 報名已結束，刪除舊記錄
-                c.execute('DELETE FROM users WHERE user_id = ?', (interaction.user.id,))
+                    # 報名已結束，刪除舊記錄
+                    c.execute('DELETE FROM users WHERE user_id = ?', (interaction.user.id,))
+                else:
+                    # 無法解析日期，直接刪除舊記錄
+                    c.execute('DELETE FROM users WHERE user_id = ?', (interaction.user.id,))
 
             # 創建新記錄（無論是新用戶還是舊報名已結束的用戶）
             c.execute('''INSERT INTO users
@@ -754,7 +782,13 @@ async def daily_reminder():
         current_start = None
         for user_id, username, equip_days, created_at, is_priority, queue_priority in all_users:
             if current_start is None:
-                current_start = datetime.fromisoformat(created_at)
+                try:
+                    current_start = datetime.fromisoformat(created_at)
+                    # 如果是offset-naive的，添加時區信息
+                    if current_start.tzinfo is None:
+                        current_start = current_start.replace(tzinfo=TZ_TAIPEI)
+                except:
+                    continue
 
             start_date = current_start.date()
 
@@ -828,7 +862,13 @@ async def announcement_schedule():
         current_start = None
         for i, (username, game_name, equip_days, created_at, is_priority, user_id, queue_priority) in enumerate(all_users, 1):
             if current_start is None:
-                current_start = datetime.fromisoformat(created_at)
+                try:
+                    current_start = datetime.fromisoformat(created_at)
+                    # 如果是offset-naive的，添加時區信息
+                    if current_start.tzinfo is None:
+                        current_start = current_start.replace(tzinfo=TZ_TAIPEI)
+                except:
+                    continue
 
             start_date = current_start
             end_date = start_date + timedelta(days=equip_days)
@@ -1135,7 +1175,13 @@ async def query_equipment(interaction: Interaction):
         for i, (username, game_name, equip_days, created_at, is_priority, queue_priority) in enumerate(all_users, 1):
             if current_start is None:
                 # 第一個用戶的開始日期是他的填寫日期
-                current_start = datetime.fromisoformat(created_at)
+                try:
+                    current_start = datetime.fromisoformat(created_at)
+                    # 如果是offset-naive的，添加時區信息
+                    if current_start.tzinfo is None:
+                        current_start = current_start.replace(tzinfo=TZ_TAIPEI)
+                except:
+                    continue
 
             start_date = current_start
             end_date = start_date + timedelta(days=equip_days)
@@ -1215,7 +1261,13 @@ async def test_announcement(interaction: Interaction):
         current_start = None
         for i, (username, game_name, equip_days, created_at, is_priority, user_id, queue_priority) in enumerate(all_users, 1):
             if current_start is None:
-                current_start = datetime.fromisoformat(created_at)
+                try:
+                    current_start = datetime.fromisoformat(created_at)
+                    # 如果是offset-naive的，添加時區信息
+                    if current_start.tzinfo is None:
+                        current_start = current_start.replace(tzinfo=TZ_TAIPEI)
+                except:
+                    continue
 
             start_date = current_start
             end_date = start_date + timedelta(days=equip_days)
@@ -1309,6 +1361,11 @@ async def query_my_info(interaction: Interaction):
             # 晚上10點後顯示完整信息
             start_date, end_date = get_actual_dates(interaction.user.id)
             if start_date and end_date:
+                # 確保start_date和end_date都有时区
+                if start_date.tzinfo is None:
+                    start_date = start_date.replace(tzinfo=TZ_TAIPEI)
+                if end_date.tzinfo is None:
+                    end_date = end_date.replace(tzinfo=TZ_TAIPEI)
                 start_str = start_date.strftime("%m月%d號")
                 end_str = end_date.strftime("%m月%d號")
                 embed.add_field(name="排隊位置", value=f"第 {position} 位", inline=False)
