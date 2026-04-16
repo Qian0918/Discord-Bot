@@ -2111,6 +2111,32 @@ print(f"[INFO] 工作目錄設置為: {os.getcwd()}")
 # 初始化數據庫
 init_database()
 
+# 檢查並同步本地資料庫（如果存在）
+import shutil
+local_db_source = None
+
+# 優先級 1: 檢查開發環境的本地路徑
+dev_paths = [
+    'd:\\discordBot\\game_data.db',
+    '/Users/Desktop/discordBot/game_data.db',
+    os.path.join(os.path.expanduser('~'), 'discordBot', 'game_data.db'),
+]
+
+for path in dev_paths:
+    if os.path.exists(path):
+        local_db_source = path
+        print(f"[INFO] 找到本地開發資料庫: {path}")
+        break
+
+# 如果找到本地資料庫，複製到當前位置
+if local_db_source and os.path.abspath(local_db_source) != os.path.abspath(DB_PATH):
+    try:
+        print(f"[INFO] 複製本地資料庫: {local_db_source} -> {DB_PATH}")
+        shutil.copy2(local_db_source, DB_PATH)
+        print("[INFO] 資料庫複製成功")
+    except Exception as e:
+        print(f"[WARNING] 資料庫複製失敗: {e}")
+
 # 運行機器人
 TOKEN = os.environ.get('DISCORD_TOKEN') or open('token.txt', 'r').read().strip()
 bot.run(TOKEN)
