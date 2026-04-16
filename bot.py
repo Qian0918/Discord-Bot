@@ -1686,72 +1686,86 @@ async def update_raffle_messages(interaction: Interaction):
         # 更新抽獎 3 和 4
         raffle_ids = [3, 4]
         updated_count = 0
+        error_log = []
         
         for raffle_id in raffle_ids:
-            # 查詢抽獎信息
-            c.execute('SELECT title, content, winners_count, end_time, message_id, channel_id FROM raffles WHERE raffle_id = ?',
-                     (raffle_id,))
-            raffle_info = c.fetchone()
-            
-            if not raffle_info:
-                print(f"[ERROR] 找不到抽獎 {raffle_id}")
-                continue
-            
-            title, content, winners_count, end_time_str, message_id, channel_id = raffle_info
-            
-            if not message_id or not channel_id:
-                print(f"[ERROR] 抽獎 {raffle_id} 缺少訊息 ID 或頻道 ID")
-                continue
-            
-            # 獲取頻道和訊息
-            channel = interaction.guild.get_channel(channel_id)
-            if not channel:
-                print(f"[ERROR] 找不到頻道 {channel_id}")
-                continue
-            
             try:
-                message = await channel.fetch_message(message_id)
-            except:
-                print(f"[ERROR] 找不到訊息 {message_id}")
-                continue
-            
-            # 獲取參與者列表
-            c.execute('SELECT username FROM raffle_entries WHERE raffle_id = ? ORDER BY username', (raffle_id,))
-            entries = c.fetchall()
-            participants_str = "\n".join([f"• {entry[0]}" for entry in entries]) if entries else "暫無報名"
-            
-            # 解析結束時間
-            try:
-                end_time = datetime.fromisoformat(end_time_str)
-                if end_time.tzinfo is None:
-                    end_time = end_time.replace(tzinfo=TZ_TAIPEI)
-            except:
-                end_time = datetime.now(TZ_TAIPEI) + timedelta(days=2)
-            
-            # 創建更新後的 embed
-            embed = discord.Embed(
-                title=f"🎰 {title}",
-                description=content,
-                color=discord.Color.gold()
-            )
-            embed.add_field(name="活動結束時間", value=end_time.strftime("%Y-%m-%d %H:%M:%S"), inline=False)
-            embed.add_field(name="得獎人數", value=f"{winners_count} 人", inline=False)
-            embed.add_field(name="活動天數", value="2 天", inline=False)
-            embed.add_field(name=f"報名人數 ({len(entries)})", value=participants_str[:1024], inline=False)
-            embed.set_footer(text=f"抽獎 ID: {raffle_id} | 點擊下方按鈕報名")
-            
-            # 編輯訊息
-            await message.edit(embed=embed)
-            updated_count += 1
-            
-            print(f"[INFO] 抽獎 {raffle_id} 訊息已更新，包含 {len(entries)} 位參與者")
+                # 查詢抽獎信息
+                c.execute('SELECT title, content, winners_count, end_time, message_id, channel_id FROM raffles WHERE raffle_id = ?',
+                         (raffle_id,))
+                raffle_info = c.fetchone()
+                
+                if not raffle_info:
+                    error_log.append(f"抽獎 {raffle_id}: 找不到抽獎記錄")
+                    continue
+                
+                title, content, winners_count, end_time_str, message_id, channel_id = raffle_info
+                
+                if not message_id or not channel_id:
+                    error_log.append(f"抽獎 {raffle_id}: 缺少訊息 ID ({message_id}) 或頻道 ID ({channel_id})")
+                    continue
+                
+                print(f"[DEBUG] 抽獎 {raffle_id}: 嘗試獲取頻道 {channel_id}, 訊息 {message_id}")
+                
+                # 獲取頻道和訊息
+                channel = interaction.guild.get_channel(channel_id)
+                if not channel:
+                    error_log.append(f"抽獎 {raffle_id}: 找不到頻道 {channel_id}")
+                    print(f"[ERROR] 找不到頻道 {channel_id}")
+                    continue
+                
+                try:
+                    message = await channel.fetch_message(message_id)
+                    print(f"[DEBUG] 成功獲取訊息 {message_id}")
+                except Exception as fetch_error:
+                    error_log.append(f"抽獎 {raffle_id}: 找不到訊息 {message_id} ({str(fetch_error)})")
+                    print(f"[ERROR] 找不到訊息 {message_id}: {str(fetch_error)}")
+                    continue
+                
+                # 獲取參與者列表
+                c.execute('SELECT username FROM raffle_entries WHERE raffle_id = ? ORDER BY username', (raffle_id,))
+                entries = c.fetchall()
+                participants_str = "\n".join([f"• {entry[0]}" for entry in entries]) if entries else "暫無報名"
+                
+                # 解析結束時間
+                try:
+                    end_time = datetime.fromisoformat(end_time_str)
+                    if end_time.tzinfo is None:
+                        end_time = end_time.replace(tzinfo=TZ_TAIPEI)
+                except:
+                    end_time = datetime.now(TZ_TAIPEI) + timedelta(days=2)
+                
+                # 創建更新後的 embed
+                embed = discord.Embed(
+                    title=f"🎰 {title}",
+                    description=content,
+                    color=discord.Color.gold()
+                )
+                embed.add_field(name="活動結束時間", value=end_time.strftime("%Y-%m-%d %H:%M:%S"), inline=False)
+                embed.add_field(name="得獎人數", value=f"{winners_count} 人", inline=False)
+                embed.add_field(name="活動天數", value="2 天", inline=False)
+                embed.add_field(name=f"報名人數 ({len(entries)})", value=participants_str[:1024], inline=False)
+                embed.set_footer(text=f"抽獎 ID: {raffle_id} | 點擊下方按鈕報名")
+                
+                # 編輯訊息
+                await message.edit(embed=embed)
+                updated_count += 1
+                print(f"[INFO] 抽獎 {raffle_id} 訊息已更新，包含 {len(entries)} 位參與者")
+                
+            except Exception as inner_error:
+                error_log.append(f"抽獎 {raffle_id}: {str(inner_error)}")
+                print(f"[ERROR] 處理抽獎 {raffle_id} 時發生錯誤: {str(inner_error)}")
+                import traceback
+                traceback.print_exc()
         
         conn.close()
         
-        await interaction.followup.send(
-            f"✅ 成功更新 {updated_count} 個抽獎訊息！",
-            ephemeral=True
-        )
+        # 構建回覆消息
+        reply = f"✅ 成功更新 {updated_count} 個抽獎訊息！"
+        if error_log:
+            reply += f"\n\n❌ 問題:\n" + "\n".join(error_log)
+        
+        await interaction.followup.send(reply, ephemeral=True)
         
     except Exception as e:
         print(f"[ERROR] 更新訊息失敗: {str(e)}")
