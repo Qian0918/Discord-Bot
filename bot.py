@@ -1672,28 +1672,34 @@ async def test_db(interaction: Interaction):
     await interaction.response.defer(ephemeral=True)
     
     try:
+        import os
+        cwd = os.getcwd()
+        
+        print(f"[DEBUG] 工作目錄: {cwd}")
         print(f"[DEBUG] DB_PATH = {DB_PATH}")
+        print(f"[DEBUG] 完整路徑 = {os.path.abspath(DB_PATH)}")
+        print(f"[DEBUG] 檔案存在? {os.path.exists(DB_PATH)}")
+        
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
         
-        # 直接查詢抽獎 3
-        c.execute('SELECT raffle_id, title, message_id, channel_id FROM raffles WHERE raffle_id = 3')
-        result = c.fetchone()
+        # 查詢所有抽獎
+        c.execute('SELECT raffle_id, title, message_id FROM raffles ORDER BY raffle_id')
+        all_raffles = c.fetchall()
         
         msg = f"✅ 資料庫連接成功\n"
-        msg += f"DB_PATH: {DB_PATH}\n\n"
-        msg += f"**抽獎 3 查詢結果:**\n"
-        if result:
-            msg += f"✓ 找到! ID={result[0]}, 標題={result[1]}, 訊息ID={result[2]}, 頻道ID={result[3]}"
-        else:
-            msg += f"✗ 找不到!"
+        msg += f"工作目錄: {cwd}\n"
+        msg += f"DB檔案: {os.path.abspath(DB_PATH)}\n"
+        msg += f"檔案存在: {os.path.exists(DB_PATH)}\n\n"
+        msg += f"**所有抽獎 ({len(all_raffles)} 個):**\n"
         
-        # 查詢所有抽獎
-        c.execute('SELECT raffle_id, title FROM raffles')
-        all_raffles = c.fetchall()
-        msg += f"\n\n**所有抽獎:**\n"
-        for rid, title in all_raffles:
-            msg += f"- 抽獎 {rid}: {title}\n"
+        if all_raffles:
+            for rid, title, msg_id in all_raffles:
+                c.execute('SELECT COUNT(*) FROM raffle_entries WHERE raffle_id = ?', (rid,))
+                count = c.fetchone()[0]
+                msg += f"- 抽獎 {rid}: {title} | 訊息ID: {msg_id} | 參與者: {count}\n"
+        else:
+            msg += "❌ 資料庫中沒有抽獎記錄！"
         
         conn.close()
         
@@ -1701,9 +1707,9 @@ async def test_db(interaction: Interaction):
         
     except Exception as e:
         import traceback
-        error_msg = f"❌ 錯誤: {str(e)}\n{traceback.format_exc()}"
+        error_msg = f"❌ 錯誤: {str(e)}\n```{traceback.format_exc()}```"
         print(error_msg)
-        await interaction.followup.send(error_msg, ephemeral=True)
+        await interaction.followup.send(error_msg[:2000], ephemeral=True)
 
 @bot.tree.command(name="更新抽獎訊息", description="更新抽獎3和4的訊息內容（管理員限定）")
 async def update_raffle_messages(interaction: Interaction):
