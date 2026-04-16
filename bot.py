@@ -8,8 +8,9 @@ import sys
 import openpyxl
 import random
 from zoneinfo import ZoneInfo
+from groq import Groq
 
-# Discord Bot v2.0 - Raffle Feature Added
+# Discord Bot v2.0 - Raffle Feature Added + AI Chat Feature
 
 # 設置 UTF-8 編碼支持
 if sys.platform == 'win32':
@@ -23,6 +24,74 @@ intents.guilds = True
 intents.members = True
 
 bot = commands.Bot(command_prefix='!', intents=intents)
+
+# ===== AI 功能配置 =====
+# 初始化 Groq 客戶端
+def get_groq_key():
+    """從環境變數或檔案中獲取 Groq API Key"""
+    # 先嘗試從環境變數獲取
+    api_key = os.environ.get('GROQ_API_KEY')
+    if api_key:
+        return api_key
+    
+    # 嘗試從 groq_key.txt 檔案讀取
+    try:
+        if os.path.exists('groq_key.txt'):
+            with open('groq_key.txt', 'r') as f:
+                api_key = f.read().strip()
+                if api_key:
+                    return api_key
+    except Exception as e:
+        print(f"[WARNING] 無法讀取 groq_key.txt: {e}")
+    
+    return None
+
+GROQ_API_KEY = get_groq_key()
+groq_client = None
+
+def init_groq():
+    """初始化 Groq API 客戶端"""
+    global groq_client
+    if not GROQ_API_KEY:
+        print("[WARNING] 未找到 GROQ_API_KEY，AI 功能將被禁用")
+        return False
+    
+    try:
+        groq_client = Groq(api_key=GROQ_API_KEY)
+        print("[INFO] Groq AI 客戶端已初始化")
+        return True
+    except Exception as e:
+        print(f"[ERROR] Groq 初始化失敗: {e}")
+    return False
+
+async def get_ai_response(user_message: str) -> str:
+    """調用 Groq API 獲取 AI 回覆
+    
+    Args:
+        user_message: 用戶的消息
+        
+    Returns:
+        AI 的回覆文本
+    """
+    if not groq_client:
+        return "AI 尚未初始化，請檢查 GROQ_API_KEY 環境變數"
+    
+    try:
+        message = groq_client.chat.completions.create(
+            messages=[
+                {
+                    "role": "user",
+                    "content": user_message,
+                }
+            ],
+            model="mixtral-8x7b-32768",  # Groq 免費模型
+            max_tokens=500,
+            temperature=0.7,
+        )
+        return message.choices[0].message.content
+    except Exception as e:
+        print(f"[ERROR] Groq API 呼叫失敗: {e}")
+        return f"AI 回覆失敗: {str(e)}"
 
 # 全局錯誤處理
 @bot.tree.error
@@ -1635,10 +1704,39 @@ async def mist_mode(interaction: Interaction):
 
 @bot.event
 async def on_message(message):
-    """訊息事件處理"""
+    """訊息事件處理 + AI 對話功能"""
     # 忽略機器人自己的訊息
     if message.author.bot:
         return
+    
+    # ===== AI 對話功能 =====
+    # 檢查是否被@了
+    if message.mentions and bot.user in message.mentions:
+        try:
+            # 移除機器人的 mention，獲取實際問題
+            user_input = message.content.replace(f'<@{bot.user.id}>', '').replace(f'<@!{bot.user.id}>', '').strip()
+            
+            # 如果沒有實際問題，回覆 "我忙著呢"
+            if not user_input:
+                await message.reply(f"我忙著呢 別煩我 {message.author.mention}")
+                print(f"[INFO] AI 對話：收到單純@ 來自 {message.author.name}")
+            else:
+                # 發送"正在思考"的反應
+                async with message.channel.typing():
+                    # 調用 AI API 獲取回覆
+                    ai_response = await get_ai_response(user_input)
+                    
+                    # 限制回覆長度（Discord 單條訊息上限 2000 字）
+                    if len(ai_response) > 1900:
+                        ai_response = ai_response[:1900] + "..."
+                    
+                    # 回覆用戶
+                    await message.reply(ai_response)
+                    print(f"[INFO] AI 對話：已回覆 {message.author.name} 的問題")
+        
+        except Exception as e:
+            print(f"[ERROR] AI 對話出錯: {e}")
+            await message.reply(f"AI 出錯了 >_<：{str(e)}")
     
     # 迷霧模式處理
     global mist_mode_enabled, mist_mode_channel_id
@@ -1655,6 +1753,9 @@ async def on_message(message):
 
     # 繼續處理其他命令
     await bot.process_commands(message)
+
+# 初始化 Groq AI
+init_groq()
 
 # 初始化數據庫
 init_database()

@@ -1,5 +1,6 @@
 # 環境相關
 token.txt
+groq_key.txt
 .env
 .venv
 venv/
