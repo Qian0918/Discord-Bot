@@ -2009,10 +2009,15 @@ async def on_message(message):
 # 初始化 Groq AI
 init_groq()
 
+# 設置工作目錄為腳本所在目錄
+import os
+script_dir = os.path.dirname(os.path.abspath(__file__))
+os.chdir(script_dir)
+print(f"[INFO] 工作目錄設置為: {os.getcwd()}")
+
 # 初始化數據庫
 init_database()
 
 # 運行機器人
-import os
 TOKEN = os.environ.get('DISCORD_TOKEN') or open('token.txt', 'r').read().strip()
 bot.run(TOKEN)
