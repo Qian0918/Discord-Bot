@@ -1666,6 +1666,99 @@ async def clear_user_data(interaction: Interaction):
             ephemeral=True
         )
 
+@bot.tree.command(name="同步資料庫", description="從本地資料庫同步抽獎數據到容器（管理員限定）")
+async def sync_database(interaction: Interaction):
+    """同步本地資料庫到容器資料庫"""
+    # 檢查是否為管理員
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message(
+            "[ERROR] 此指令僅限管理員使用",
+            ephemeral=True
+        )
+        return
+    
+    await interaction.response.defer(ephemeral=True)
+    
+    try:
+        import os
+        import shutil
+        
+        # 定義路徑
+        local_db_path = 'd:\\discordBot\\game_data.db'  # 本地資料庫路徑
+        container_db_path = os.path.abspath(DB_PATH)  # 容器中的資料庫路徑
+        
+        print(f"[INFO] 本地DB: {local_db_path}")
+        print(f"[INFO] 容器DB: {container_db_path}")
+        print(f"[INFO] 本地DB存在: {os.path.exists(local_db_path)}")
+        
+        if not os.path.exists(local_db_path):
+            await interaction.followup.send(
+                f"❌ 找不到本地資料庫: {local_db_path}",
+                ephemeral=True
+            )
+            return
+        
+        # 連接本地資料庫
+        local_conn = sqlite3.connect(local_db_path)
+        local_c = local_conn.cursor()
+        
+        # 獲取所有抽獎數據
+        local_c.execute('SELECT raffle_id, title, content, winners_count, end_time, message_id, channel_id, start_time, status FROM raffles')
+        raffles = local_c.fetchall()
+        
+        # 連接容器資料庫
+        container_conn = sqlite3.connect(container_db_path)
+        container_c = container_conn.cursor()
+        
+        # 清空並重新插入抽獎數據
+        container_c.execute('DELETE FROM raffle_entries')
+        container_c.execute('DELETE FROM raffles')
+        
+        sync_count = 0
+        for raffle_data in raffles:
+            raffle_id = raffle_data[0]
+            container_c.execute(
+                '''INSERT INTO raffles (raffle_id, title, content, winners_count, end_time, message_id, channel_id, start_time, status)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                raffle_data
+            )
+            sync_count += 1
+            
+            # 同步抽獎參與者
+            local_c.execute('SELECT user_id, username FROM raffle_entries WHERE raffle_id = ?', (raffle_id,))
+            entries = local_c.fetchall()
+            
+            for user_id, username in entries:
+                container_c.execute(
+                    'INSERT INTO raffle_entries (raffle_id, user_id, username, joined_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)',
+                    (raffle_id, user_id, username)
+                )
+        
+        container_conn.commit()
+        
+        # 驗證
+        container_c.execute('SELECT COUNT(*) FROM raffles')
+        raffle_count = container_c.fetchone()[0]
+        
+        container_c.execute('SELECT COUNT(*) FROM raffle_entries')
+        entry_count = container_c.fetchone()[0]
+        
+        local_conn.close()
+        container_conn.close()
+        
+        msg = f"✅ 資料庫同步成功！\n"
+        msg += f"同步抽獎: {sync_count} 個\n"
+        msg += f"容器DB - 抽獎: {raffle_count} 個, 參與者: {entry_count} 人"
+        
+        print(f"[INFO] {msg}")
+        await interaction.followup.send(msg, ephemeral=True)
+        
+    except Exception as e:
+        import traceback
+        error_msg = f"❌ 同步失敗: {str(e)}\n```{traceback.format_exc()[:500]}```"
+        print(f"[ERROR] {error_msg}")
+        await interaction.followup.send(error_msg[:2000], ephemeral=True)
+
 @bot.tree.command(name="測試資料庫", description="測試資料庫連接和抽獎3、4是否存在")
 async def test_db(interaction: Interaction):
     """測試資料庫連接"""
