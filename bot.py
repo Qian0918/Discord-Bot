@@ -1885,10 +1885,11 @@ async def update_raffle_messages(interaction: Interaction):
                 embed.add_field(name=f"報名人數 ({len(entries)})", value=participants_str[:1024], inline=False)
                 embed.set_footer(text=f"抽獎 ID: {raffle_id} | 點擊下方按鈕報名")
                 
-                # 編輯訊息
-                await message.edit(embed=embed)
+                # 編輯訊息，並添加按鈕視圖
+                view = RaffleButtonView(raffle_id)
+                await message.edit(embed=embed, view=view)
                 updated_count += 1
-                print(f"[INFO] 抽獎 {raffle_id} 訊息已更新，包含 {len(entries)} 位參與者")
+                print(f"[INFO] 抽獎 {raffle_id} 訊息已更新，包含 {len(entries)} 位參與者，按鈕已添加")
                 
             except Exception as inner_error:
                 error_log.append(f"抽獎 {raffle_id}: {str(inner_error)}")
