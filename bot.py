@@ -673,7 +673,13 @@ class RaffleButtonView(discord.ui.View):
                 title, end_time, winners_count = raffle_info
                 print(f"[DEBUG] 抽獎資訊: {title}, 結束時間: {end_time}")
                 
-                end_time_obj = datetime.fromisoformat(end_time)
+                try:
+                    end_time_obj = datetime.fromisoformat(end_time)
+                    if end_time_obj.tzinfo is None:
+                        end_time_obj = end_time_obj.replace(tzinfo=TZ_TAIPEI)
+                except:
+                    end_time_obj = datetime.now(TZ_TAIPEI) + timedelta(days=2)
+                
                 remaining = end_time_obj - datetime.now(TZ_TAIPEI)
 
                 embed = discord.Embed(
