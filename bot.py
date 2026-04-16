@@ -1666,6 +1666,45 @@ async def clear_user_data(interaction: Interaction):
             ephemeral=True
         )
 
+@bot.tree.command(name="測試資料庫", description="測試資料庫連接和抽獎3、4是否存在")
+async def test_db(interaction: Interaction):
+    """測試資料庫連接"""
+    await interaction.response.defer(ephemeral=True)
+    
+    try:
+        print(f"[DEBUG] DB_PATH = {DB_PATH}")
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        
+        # 直接查詢抽獎 3
+        c.execute('SELECT raffle_id, title, message_id, channel_id FROM raffles WHERE raffle_id = 3')
+        result = c.fetchone()
+        
+        msg = f"✅ 資料庫連接成功\n"
+        msg += f"DB_PATH: {DB_PATH}\n\n"
+        msg += f"**抽獎 3 查詢結果:**\n"
+        if result:
+            msg += f"✓ 找到! ID={result[0]}, 標題={result[1]}, 訊息ID={result[2]}, 頻道ID={result[3]}"
+        else:
+            msg += f"✗ 找不到!"
+        
+        # 查詢所有抽獎
+        c.execute('SELECT raffle_id, title FROM raffles')
+        all_raffles = c.fetchall()
+        msg += f"\n\n**所有抽獎:**\n"
+        for rid, title in all_raffles:
+            msg += f"- 抽獎 {rid}: {title}\n"
+        
+        conn.close()
+        
+        await interaction.followup.send(msg, ephemeral=True)
+        
+    except Exception as e:
+        import traceback
+        error_msg = f"❌ 錯誤: {str(e)}\n{traceback.format_exc()}"
+        print(error_msg)
+        await interaction.followup.send(error_msg, ephemeral=True)
+
 @bot.tree.command(name="更新抽獎訊息", description="更新抽獎3和4的訊息內容（管理員限定）")
 async def update_raffle_messages(interaction: Interaction):
     """更新抽獎 3 和 4 的訊息，添加完整的參與者列表"""
