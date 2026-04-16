@@ -642,26 +642,23 @@ class RaffleButtonView(discord.ui.View):
             except:
                 pass
 
-    @discord.ui.button(label="結束抽獎 (管理員)")
+    @discord.ui.button(label="結束抽獎 (發起者)")
     async def end_raffle_button(self, interaction: Interaction, button: discord.ui.Button):
-        """提早結束抽獎 (管理員限定)"""
-        await interaction.response.defer(ephemeral=True)
+        """提早結束抽獎 (發起者限定)"""
+        try:
+            await interaction.response.defer(ephemeral=True)
+        except Exception as e:
+            print(f"[ERROR] defer 失敗: {str(e)}")
+            return
 
         try:
-            # 檢查是否是管理員或有對應身份組
-            if not (interaction.user.guild_permissions.administrator or
-                   any(role.id == REQUIRED_ROLE_ID for role in interaction.user.roles)):
-                await interaction.followup.send(
-                    "[ERROR] 只有管理員可以提早結束抽獎",
-                    ephemeral=True
-                )
-                return
-
+            print(f"[DEBUG] 結束抽獎 - raffle_id: {self.raffle_id}, user: {interaction.user.name} ({interaction.user.id})")
+            
             conn = sqlite3.connect(DB_PATH)
             c = conn.cursor()
 
-            # 獲取抽獎信息
-            c.execute('SELECT title, winners_count FROM raffles WHERE raffle_id = ? AND status = ?',
+            # 獲取抽獎信息（包括 creator_id）
+            c.execute('SELECT title, winners_count, creator_id FROM raffles WHERE raffle_id = ? AND status = ?',
                      (self.raffle_id, 'active'))
             raffle_info = c.fetchone()
 
@@ -670,7 +667,17 @@ class RaffleButtonView(discord.ui.View):
                 conn.close()
                 return
 
-            title, winners_count = raffle_info
+            title, winners_count, creator_id = raffle_info
+            
+            # 檢查是否是發起者
+            if interaction.user.id != creator_id:
+                await interaction.followup.send(
+                    f"❌ 你沒有權限結束這個抽獎！\n只有發起者 <@{creator_id}> 才能結束。",
+                    ephemeral=True
+                )
+                conn.close()
+                print(f"[DEBUG] 結束抽獎被拒—非發起者 (請求者: {interaction.user.id}, 發起者: {creator_id})")
+                return
 
             # 獲取所有報名者
             c.execute('SELECT user_id, username FROM raffle_entries WHERE raffle_id = ? ORDER BY RANDOM()',
@@ -687,6 +694,7 @@ class RaffleButtonView(discord.ui.View):
             # 隨機抽取得獎者
             selected_count = min(winners_count, len(entries))
             winners = entries[:selected_count]
+            print(f"[DEBUG] 抽獎結果: 共 {len(entries)} 人報名，抽取 {selected_count} 人得獎")
 
             # 構建得獎者名單
             winners_list = []
@@ -719,6 +727,7 @@ class RaffleButtonView(discord.ui.View):
                 # 發送訊息
                 mention_str = " ".join(winners_mention)
                 await channel.send(f"🎊 恭喜得獎者！{mention_str}", embed=embed)
+                print(f"[DEBUG] 已發送得獎名單到頻道")
 
             # 更新狀態
             c.execute('UPDATE raffles SET status = ? WHERE raffle_id = ?', ('drawn', self.raffle_id))
@@ -729,12 +738,21 @@ class RaffleButtonView(discord.ui.View):
                 f"✅ 抽獎已提早結束！\n得獎人數: {selected_count} 人",
                 ephemeral=True
             )
+            print(f"[DEBUG] 提早結束抽獎成功 - raffle_id: {self.raffle_id}")
+        except sqlite3.Error as db_error:
+            print(f"[ERROR] 結束抽獎數據庫錯誤: {str(db_error)}")
+            try:
+                await interaction.followup.send(f"[ERROR] 數據庫錯誤: {str(db_error)}", ephemeral=True)
+            except:
+                pass
         except Exception as e:
-            print(f"[ERROR] 提早結束抽獎錯誤: {str(e)}")
-            await interaction.followup.send(
-                f"[ERROR] 出現錯誤: {str(e)}",
-                ephemeral=True
-            )
+            print(f"[ERROR] 提早結束抽獎錯誤: {type(e).__name__}: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            try:
+                await interaction.followup.send(f"[ERROR] 出現錯誤: {str(e)}", ephemeral=True)
+            except:
+                pass
 
 @bot.event
 async def on_ready():
