@@ -1666,6 +1666,103 @@ async def clear_user_data(interaction: Interaction):
             ephemeral=True
         )
 
+@bot.tree.command(name="發佈抽獎5和6", description="自動發佈抽獎5和6（管理員限定）")
+async def publish_raffles_5_6(interaction: Interaction):
+    """自動發佈抽獎 5 和 6 到指定頻道"""
+    # 檢查是否為管理員
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message(
+            "[ERROR] 此指令僅限管理員使用",
+            ephemeral=True
+        )
+        return
+    
+    await interaction.response.defer(ephemeral=True)
+    
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        
+        # 發佈抽獎 5 和 6
+        raffle_ids = [5, 6]
+        published_count = 0
+        
+        for raffle_id in raffle_ids:
+            # 查詢抽獎信息
+            c.execute('SELECT title, content, winners_count, end_time, channel_id FROM raffles WHERE raffle_id = ?',
+                     (raffle_id,))
+            raffle_info = c.fetchone()
+            
+            if not raffle_info:
+                print(f"[ERROR] 找不到抽獎 {raffle_id}")
+                continue
+            
+            title, content, winners_count, end_time_str, channel_id = raffle_info
+            
+            # 獲取頻道
+            if not channel_id:
+                print(f"[ERROR] 抽獎 {raffle_id} 沒有設置頻道")
+                continue
+            
+            channel = interaction.guild.get_channel(channel_id)
+            if not channel:
+                print(f"[ERROR] 找不到頻道 {channel_id}")
+                continue
+            
+            # 檢查是否已經發佈過
+            c.execute('SELECT message_id FROM raffles WHERE raffle_id = ?', (raffle_id,))
+            existing_msg = c.fetchone()
+            if existing_msg and existing_msg[0]:
+                print(f"[INFO] 抽獎 {raffle_id} 已發佈過，跳過")
+                continue
+            
+            # 解析結束時間
+            try:
+                end_time = datetime.fromisoformat(end_time_str)
+                if end_time.tzinfo is None:
+                    end_time = end_time.replace(tzinfo=TZ_TAIPEI)
+            except:
+                end_time = datetime.now(TZ_TAIPEI) + timedelta(days=2)
+            
+            # 創建 embed
+            embed = discord.Embed(
+                title=f"🎰 {title}",
+                description=content,
+                color=discord.Color.gold()
+            )
+            embed.add_field(name="活動結束時間", value=end_time.strftime("%Y-%m-%d %H:%M:%S"), inline=False)
+            embed.add_field(name="得獎人數", value=f"{winners_count} 人", inline=False)
+            embed.add_field(name="活動天數", value="2 天", inline=False)
+            embed.set_footer(text=f"抽獎 ID: {raffle_id} | 點擊下方按鈕報名")
+            
+            # 發送訊息
+            view = RaffleButtonView(raffle_id)
+            msg = await channel.send(embed=embed, view=view)
+            
+            # 保存訊息 ID
+            c.execute('UPDATE raffles SET message_id = ? WHERE raffle_id = ?',
+                     (msg.id, raffle_id))
+            conn.commit()
+            published_count += 1
+            
+            print(f"[INFO] 抽獎 {raffle_id} 已發佈，訊息 ID: {msg.id}")
+        
+        conn.close()
+        
+        await interaction.followup.send(
+            f"✅ 成功發佈 {published_count} 個抽獎！",
+            ephemeral=True
+        )
+        
+    except Exception as e:
+        print(f"[ERROR] 發佈抽獎失敗: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        await interaction.followup.send(
+            f"[ERROR] 發佈失敗: {str(e)}",
+            ephemeral=True
+        )
+
 @bot.tree.command(name="迷霧模式", description="開啟迷霧模式（管理員限定）")
 async def mist_mode(interaction: Interaction):
     """開啟迷霧模式"""
