@@ -516,9 +516,14 @@ class RaffleButtonView(discord.ui.View):
     @discord.ui.button(label="報名抽獎")
     async def join_button(self, interaction: Interaction, button: discord.ui.Button):
         """報名或取消報名"""
-        await interaction.response.defer(ephemeral=True)
+        try:
+            await interaction.response.defer(ephemeral=True)
+        except Exception as e:
+            print(f"[ERROR] defer 失敗: {str(e)}")
+            return
 
         try:
+            print(f"[DEBUG] 報名抽獎 - raffle_id: {self.raffle_id}, user: {interaction.user.name} ({interaction.user.id})")
             conn = sqlite3.connect(DB_PATH)
             c = conn.cursor()
 
@@ -532,36 +537,62 @@ class RaffleButtonView(discord.ui.View):
                 c.execute('DELETE FROM raffle_entries WHERE raffle_id = ? AND user_id = ?',
                          (self.raffle_id, interaction.user.id))
                 message = "✅ 已取消報名"
+                print(f"[DEBUG] 取消報名成功 - raffle_id: {self.raffle_id}, user_id: {interaction.user.id}")
             else:
                 # 未報名，添加報名
                 c.execute('''INSERT INTO raffle_entries (raffle_id, user_id, username)
                     VALUES (?, ?, ?)''',
                     (self.raffle_id, interaction.user.id, interaction.user.name))
                 message = "✅ 報名成功"
+                print(f"[DEBUG] 報名成功 - raffle_id: {self.raffle_id}, user_id: {interaction.user.id}")
 
             conn.commit()
             conn.close()
 
-            await interaction.followup.send(message, ephemeral=True)
+            try:
+                await interaction.followup.send(message, ephemeral=True)
+            except Exception as send_error:
+                print(f"[ERROR] 發送報名結果失敗: {str(send_error)}")
+        except sqlite3.IntegrityError as int_error:
+            print(f"[ERROR] 報名重複或數據約束錯誤: {str(int_error)}")
+            try:
+                await interaction.followup.send("✅ 已取消報名", ephemeral=True)
+            except:
+                pass
+        except sqlite3.Error as db_error:
+            print(f"[ERROR] 報名數據庫錯誤: {str(db_error)}")
+            try:
+                await interaction.followup.send(f"[ERROR] 數據庫錯誤: {str(db_error)}", ephemeral=True)
+            except:
+                pass
         except Exception as e:
-            print(f"[ERROR] 報名按鈕錯誤: {str(e)}")
-            await interaction.followup.send(
-                f"[ERROR] 出現錯誤: {str(e)}",
-                ephemeral=True
-            )
+            print(f"[ERROR] 報名按鈕錯誤: {type(e).__name__}: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            try:
+                await interaction.followup.send(f"[ERROR] 出現錯誤: {str(e)}", ephemeral=True)
+            except:
+                pass
 
     @discord.ui.button(label="查看報名人數")
     async def check_button(self, interaction: Interaction, button: discord.ui.Button):
         """查看報名人數"""
-        await interaction.response.defer(ephemeral=True)
+        try:
+            await interaction.response.defer(ephemeral=True)
+        except Exception as e:
+            print(f"[ERROR] defer 失敗: {str(e)}")
+            return
 
         try:
+            print(f"[DEBUG] 查看報名 - raffle_id: {self.raffle_id}, user: {interaction.user.name}")
             conn = sqlite3.connect(DB_PATH)
             c = conn.cursor()
 
             # 獲取報名人數
             c.execute('SELECT COUNT(*) FROM raffle_entries WHERE raffle_id = ?', (self.raffle_id,))
-            count = c.fetchone()[0]
+            count_result = c.fetchone()
+            count = count_result[0] if count_result else 0
+            print(f"[DEBUG] 報名人數查詢成功: {count}")
 
             # 獲取抽獎資訊
             c.execute('SELECT title, end_time, winners_count FROM raffles WHERE raffle_id = ?',
@@ -571,6 +602,8 @@ class RaffleButtonView(discord.ui.View):
 
             if raffle_info:
                 title, end_time, winners_count = raffle_info
+                print(f"[DEBUG] 抽獎資訊: {title}, 結束時間: {end_time}")
+                
                 end_time_obj = datetime.fromisoformat(end_time)
                 remaining = end_time_obj - datetime.now(TZ_TAIPEI)
 
@@ -583,15 +616,31 @@ class RaffleButtonView(discord.ui.View):
                 embed.add_field(name="中獎機率", value=f"{round(winners_count/max(count,1)*100, 2)}%", inline=False)
                 embed.add_field(name="距離結束", value=f"{remaining.days} 天 {remaining.seconds//3600} 小時", inline=False)
 
-                await interaction.followup.send(embed=embed, ephemeral=True)
+                try:
+                    await interaction.followup.send(embed=embed, ephemeral=True)
+                    print(f"[DEBUG] 發送報名統計成功")
+                except Exception as send_error:
+                    print(f"[ERROR] 發送 followup 失敗: {str(send_error)}")
             else:
-                await interaction.followup.send("[ERROR] 找不到抽獎資訊", ephemeral=True)
+                print(f"[ERROR] 找不到抽獎資訊 - raffle_id: {self.raffle_id}")
+                try:
+                    await interaction.followup.send("[ERROR] 找不到抽獎資訊", ephemeral=True)
+                except Exception as send_error:
+                    print(f"[ERROR] 發送錯誤訊息失敗: {str(send_error)}")
+        except sqlite3.Error as db_error:
+            print(f"[ERROR] 數據庫錯誤: {str(db_error)}")
+            try:
+                await interaction.followup.send(f"[ERROR] 數據庫錯誤: {str(db_error)}", ephemeral=True)
+            except:
+                pass
         except Exception as e:
-            print(f"[ERROR] 查看報名錯誤: {str(e)}")
-            await interaction.followup.send(
-                f"[ERROR] 出現錯誤: {str(e)}",
-                ephemeral=True
-            )
+            print(f"[ERROR] 查看報名錯誤: {type(e).__name__}: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            try:
+                await interaction.followup.send(f"[ERROR] 出現錯誤: {str(e)}", ephemeral=True)
+            except:
+                pass
 
     @discord.ui.button(label="結束抽獎 (管理員)")
     async def end_raffle_button(self, interaction: Interaction, button: discord.ui.Button):
