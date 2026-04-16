@@ -1666,6 +1666,102 @@ async def clear_user_data(interaction: Interaction):
             ephemeral=True
         )
 
+@bot.tree.command(name="更新抽獎訊息", description="更新抽獎3和4的訊息內容（管理員限定）")
+async def update_raffle_messages(interaction: Interaction):
+    """更新抽獎 3 和 4 的訊息，添加完整的參與者列表"""
+    # 檢查是否為管理員
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message(
+            "[ERROR] 此指令僅限管理員使用",
+            ephemeral=True
+        )
+        return
+    
+    await interaction.response.defer(ephemeral=True)
+    
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        
+        # 更新抽獎 3 和 4
+        raffle_ids = [3, 4]
+        updated_count = 0
+        
+        for raffle_id in raffle_ids:
+            # 查詢抽獎信息
+            c.execute('SELECT title, content, winners_count, end_time, message_id, channel_id FROM raffles WHERE raffle_id = ?',
+                     (raffle_id,))
+            raffle_info = c.fetchone()
+            
+            if not raffle_info:
+                print(f"[ERROR] 找不到抽獎 {raffle_id}")
+                continue
+            
+            title, content, winners_count, end_time_str, message_id, channel_id = raffle_info
+            
+            if not message_id or not channel_id:
+                print(f"[ERROR] 抽獎 {raffle_id} 缺少訊息 ID 或頻道 ID")
+                continue
+            
+            # 獲取頻道和訊息
+            channel = interaction.guild.get_channel(channel_id)
+            if not channel:
+                print(f"[ERROR] 找不到頻道 {channel_id}")
+                continue
+            
+            try:
+                message = await channel.fetch_message(message_id)
+            except:
+                print(f"[ERROR] 找不到訊息 {message_id}")
+                continue
+            
+            # 獲取參與者列表
+            c.execute('SELECT username FROM raffle_entries WHERE raffle_id = ? ORDER BY username', (raffle_id,))
+            entries = c.fetchall()
+            participants_str = "\n".join([f"• {entry[0]}" for entry in entries]) if entries else "暫無報名"
+            
+            # 解析結束時間
+            try:
+                end_time = datetime.fromisoformat(end_time_str)
+                if end_time.tzinfo is None:
+                    end_time = end_time.replace(tzinfo=TZ_TAIPEI)
+            except:
+                end_time = datetime.now(TZ_TAIPEI) + timedelta(days=2)
+            
+            # 創建更新後的 embed
+            embed = discord.Embed(
+                title=f"🎰 {title}",
+                description=content,
+                color=discord.Color.gold()
+            )
+            embed.add_field(name="活動結束時間", value=end_time.strftime("%Y-%m-%d %H:%M:%S"), inline=False)
+            embed.add_field(name="得獎人數", value=f"{winners_count} 人", inline=False)
+            embed.add_field(name="活動天數", value="2 天", inline=False)
+            embed.add_field(name=f"報名人數 ({len(entries)})", value=participants_str[:1024], inline=False)
+            embed.set_footer(text=f"抽獎 ID: {raffle_id} | 點擊下方按鈕報名")
+            
+            # 編輯訊息
+            await message.edit(embed=embed)
+            updated_count += 1
+            
+            print(f"[INFO] 抽獎 {raffle_id} 訊息已更新，包含 {len(entries)} 位參與者")
+        
+        conn.close()
+        
+        await interaction.followup.send(
+            f"✅ 成功更新 {updated_count} 個抽獎訊息！",
+            ephemeral=True
+        )
+        
+    except Exception as e:
+        print(f"[ERROR] 更新訊息失敗: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        await interaction.followup.send(
+            f"[ERROR] 更新失敗: {str(e)}",
+            ephemeral=True
+        )
+
 @bot.tree.command(name="發佈抽獎5和6", description="自動發佈抽獎5和6（管理員限定）")
 async def publish_raffles_5_6(interaction: Interaction):
     """自動發佈抽獎 5 和 6 到指定頻道"""
