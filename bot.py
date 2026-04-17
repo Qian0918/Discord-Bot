@@ -32,6 +32,7 @@ def get_groq_key():
     # 先嘗試從環境變數獲取
     api_key = os.environ.get('GROQ_API_KEY')
     if api_key:
+        print(f"[INFO] 從環境變數讀取到 GROQ_API_KEY")
         return api_key
     
     # 嘗試從 groq_key.txt 檔案讀取
@@ -40,10 +41,12 @@ def get_groq_key():
             with open('groq_key.txt', 'r') as f:
                 api_key = f.read().strip()
                 if api_key:
+                    print(f"[INFO] 從 groq_key.txt 讀取到 GROQ_API_KEY")
                     return api_key
     except Exception as e:
         print(f"[WARNING] 無法讀取 groq_key.txt: {e}")
     
+    print("[WARNING] 未找到 GROQ_API_KEY")
     return None
 
 GROQ_API_KEY = get_groq_key()
@@ -64,6 +67,9 @@ def init_groq():
         print(f"[ERROR] Groq 初始化失敗: {e}")
     return False
 
+# 在程式啟動時立即初始化 Groq 客戶端
+init_groq()
+
 async def get_ai_response(user_message: str) -> str:
     """調用 Groq API 獲取 AI 回覆
     
@@ -73,6 +79,20 @@ async def get_ai_response(user_message: str) -> str:
     Returns:
         AI 的回覆文本
     """
+    global groq_client, GROQ_API_KEY
+    
+    # 如果客戶端未初始化，嘗試重新初始化
+    if not groq_client:
+        # 重新嘗試獲取 API Key
+        if not GROQ_API_KEY:
+            GROQ_API_KEY = get_groq_key()
+        
+        if GROQ_API_KEY:
+            init_groq()
+        
+        if not groq_client:
+            raise Exception("Groq 客戶端無法初始化，請檢查 GROQ_API_KEY 是否存在")
+    
     try:
         message = groq_client.chat.completions.create(
             messages=[
@@ -831,9 +851,6 @@ async def on_ready():
     """機器人上線事件"""
     print(f'{bot.user} 已上線！')
     print(f"機器人 ID: {bot.user.id}")
-
-    # 初始化 Groq AI 客戶端
-    init_groq()
 
     # 啟動定時提醒任務
     if not daily_reminder.is_running():
