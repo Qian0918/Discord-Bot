@@ -54,20 +54,27 @@ groq_client = None
 
 def init_groq():
     """初始化 Groq API 客戶端"""
-    global groq_client
+    global groq_client, GROQ_API_KEY
+    
+    # 如果第一次沒有取到，再嘗試從檔案讀取
+    if not GROQ_API_KEY:
+        GROQ_API_KEY = get_groq_key()
+    
     if not GROQ_API_KEY:
         print("[WARNING] 未找到 GROQ_API_KEY，AI 功能將被禁用")
         return False
     
     try:
         groq_client = Groq(api_key=GROQ_API_KEY)
-        print("[INFO] Groq AI 客戶端已初始化")
+        print("[INFO] Groq AI client initialized successfully")
         return True
     except Exception as e:
-        print(f"[ERROR] Groq 初始化失敗: {e}")
+        print(f"[ERROR] Groq init failed: {e}")
+        groq_client = None
     return False
 
 # 在程式啟動時立即初始化 Groq 客戶端
+print("[INFO] Initializing Groq at module load...")
 init_groq()
 
 async def get_ai_response(user_message: str) -> str:
