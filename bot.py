@@ -84,7 +84,7 @@ async def get_ai_response(user_message: str) -> str:
                     "content": user_message,
                 }
             ],
-            model="llama-3.1-70b-versatile",  # 更新為支持的模型
+            model="llama-3.3-70b-versatile",  # 更新為最新支持的模型
             max_tokens=500,
             temperature=0.7,
         )
