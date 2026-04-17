@@ -73,10 +73,6 @@ async def get_ai_response(user_message: str) -> str:
     Returns:
         AI 的回覆文本
     """
-    # 檢查是否有 API Key 和客戶端
-    if not GROQ_API_KEY or not groq_client:
-        return "AI 尚未初始化，請稍候片刻後重試"
-    
     try:
         message = groq_client.chat.completions.create(
             messages=[
