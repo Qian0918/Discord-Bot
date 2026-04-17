@@ -11,6 +11,7 @@ RUN pip install --upgrade pip && \
 COPY bot.py .
 COPY token.txt .
 COPY groq_key.txt .
+COPY id.xlsx .
 
 # 設置 UTF-8 編碼
 ENV PYTHONUNBUFFERED=1
