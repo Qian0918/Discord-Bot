@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  discord-bot:
+    build: .
+    container_name: discord-bot
+    environment:
+      - DISCORD_TOKEN=${DISCORD_TOKEN}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+    volumes:
+      - ./game_data.db:/app/game_data.db
+      - ./token.txt:/app/token.txt
+      - ./groq_key.txt:/app/groq_key.txt:ro
+    restart: unless-stopped
