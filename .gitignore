@@ -9,6 +9,7 @@ env/
 # 數據庫
 *.db
 game_data.db
+id.xlsx
 
 # Python
 __pycache__/

@@ -11,4 +11,5 @@ services:
       - ./game_data.db:/app/game_data.db
       - ./token.txt:/app/token.txt
       - ./groq_key.txt:/app/groq_key.txt:ro
+      - ./id.xlsx:/app/id.xlsx
     restart: unless-stopped
