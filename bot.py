@@ -73,8 +73,11 @@ async def get_ai_response(user_message: str) -> str:
     Returns:
         AI 的回覆文本
     """
-    if not groq_client:
+    if not GROQ_API_KEY:
         return "AI 尚未初始化，請檢查 GROQ_API_KEY 環境變數"
+    
+    if not groq_client:
+        return "AI 客戶端初始化失敗，請稍後重試"
     
     try:
         message = groq_client.chat.completions.create(
@@ -84,7 +87,7 @@ async def get_ai_response(user_message: str) -> str:
                     "content": user_message,
                 }
             ],
-            model="llama-3.3-70b-versatile",  # 更新為最新支持的模型
+            model="llama-3.3-70b-versatile",  # 最新支持的模型
             max_tokens=500,
             temperature=0.7,
         )
