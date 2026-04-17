@@ -832,6 +832,9 @@ async def on_ready():
     print(f'{bot.user} 已上線！')
     print(f"機器人 ID: {bot.user.id}")
 
+    # 初始化 Groq AI 客戶端
+    init_groq()
+
     # 啟動定時提醒任務
     if not daily_reminder.is_running():
         daily_reminder.start()
@@ -1735,11 +1738,10 @@ async def on_message(message):
                     
                     # 回覆用戶
                     await message.reply(ai_response)
-                    print(f"[INFO] AI 對話：已回覆 {message.author.name} 的問題")
         
         except Exception as e:
             print(f"[ERROR] AI 對話出錯: {e}")
-            await message.reply(f"AI 出錯了 >_<：{str(e)}")
+            # 只有出錯時才會顯示錯誤，避免其他回答
     
     # 迷霧模式處理
     global mist_mode_enabled, mist_mode_channel_id
