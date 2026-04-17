@@ -84,7 +84,7 @@ async def get_ai_response(user_message: str) -> str:
                     "content": user_message,
                 }
             ],
-            model="mixtral-8x7b-32768",  # Groq 免費模型
+            model="llama-3.1-70b-versatile",  # 更新為支持的模型
             max_tokens=500,
             temperature=0.7,
         )
