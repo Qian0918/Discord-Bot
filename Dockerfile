@@ -10,7 +10,6 @@ RUN pip install --upgrade pip && \
 # 複製應用文件
 COPY bot.py .
 COPY token.txt .
-COPY groq_key.txt .
 
 # 設置 UTF-8 編碼
 ENV PYTHONUNBUFFERED=1
