@@ -29,24 +29,35 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 # 初始化 Groq 客戶端
 def get_groq_key():
     """Get Groq API Key from environment variables or file"""
+    import os
+    
     # Try from environment variables first
     api_key = os.environ.get('GROQ_API_KEY')
     if api_key:
         print("[INFO] GROQ_API_KEY loaded from environment")
         return api_key
     
-    # Try from groq_key.txt file
-    try:
-        if os.path.exists('groq_key.txt'):
-            with open('groq_key.txt', 'r', encoding='utf-8') as f:
-                api_key = f.read().strip()
-                if api_key:
-                    print("[INFO] GROQ_API_KEY loaded from groq_key.txt")
-                    return api_key
-    except Exception as e:
-        print(f"[WARNING] Failed to read groq_key.txt: {e}")
+    # Try from groq_key.txt file - multiple possible paths
+    possible_paths = [
+        'groq_key.txt',
+        './groq_key.txt',
+        '/app/groq_key.txt',
+        os.path.join(os.path.dirname(__file__), 'groq_key.txt'),
+        'd:\\discordBot\\groq_key.txt',
+    ]
     
-    print("[WARNING] GROQ_API_KEY not found")
+    for path in possible_paths:
+        try:
+            if os.path.exists(path):
+                with open(path, 'r', encoding='utf-8') as f:
+                    api_key = f.read().strip()
+                    if api_key:
+                        print(f"[INFO] GROQ_API_KEY loaded from {path}")
+                        return api_key
+        except Exception as e:
+            print(f"[DEBUG] Tried {path}, failed: {e}")
+    
+    print("[WARNING] GROQ_API_KEY not found in any location")
     return None
 
 GROQ_API_KEY = get_groq_key()
@@ -1816,6 +1827,24 @@ if local_db_source and os.path.abspath(local_db_source) != os.path.abspath(DB_PA
         print("[INFO] 資料庫複製成功")
     except Exception as e:
         print(f"[WARNING] 資料庫複製失敗: {e}")
+
+# 複製 groq_key.txt 如果存在
+groq_key_source_paths = [
+    'd:\\discordBot\\groq_key.txt',
+    '/Users/Desktop/discordBot/groq_key.txt',
+    os.path.join(os.path.expanduser('~'), 'discordBot', 'groq_key.txt'),
+]
+
+for source_path in groq_key_source_paths:
+    if os.path.exists(source_path):
+        try:
+            dest_path = os.path.join(script_dir, 'groq_key.txt')
+            if os.path.abspath(source_path) != os.path.abspath(dest_path):
+                shutil.copy2(source_path, dest_path)
+                print(f"[INFO] Groq key copied: {source_path} -> {dest_path}")
+        except Exception as e:
+            print(f"[WARNING] Failed to copy Groq key: {e}")
+        break
 
 # 運行機器人
 TOKEN = os.environ.get('DISCORD_TOKEN') or open('token.txt', 'r').read().strip()
