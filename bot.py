@@ -415,68 +415,58 @@ class EquipmentForm(discord.ui.Modal):
             now = datetime.now(TZ_TAIPEI)
             now_iso = now.isoformat()
 
-            # 如果用戶已經存在，檢查他們的報名日期是否結束
+            # 如果用戶已經存在
             if existing:
                 old_equip_days, created_at = existing
-                # 計算舊的結束日期
-                try:
-                    start_date = datetime.fromisoformat(created_at)
-                    # 如果是offset-naive的，添加時區信息
-                    if start_date.tzinfo is None:
-                        start_date = start_date.replace(tzinfo=TZ_TAIPEI)
-                except:
-                    # 如果解析失敗，刪除舊記錄
-                    c.execute('DELETE FROM users WHERE user_id = ?', (interaction.user.id,))
-                    conn.commit()
-                    # 繼續創建新記錄
-                    start_date = None
                 
-                if start_date:
-                    end_date = start_date + timedelta(days=old_equip_days)
+                # 更新現有記錄（允許修改報名信息）
+                c.execute('''UPDATE users 
+                            SET game_name = ?, equip_days = ?, max_fate_cost = ?
+                            WHERE user_id = ?''',
+                    (self.game_name.value, equip_days, max_fate_cost, interaction.user.id))
+                
+                conn.commit()
+                
+                # 回應用戶
+                priority_text = "✨ [優先級用戶]" if is_priority else ""
+                change_info = ""
+                if old_equip_days != equip_days:
+                    change_info = f"\n\n📝 收裝備天數已從 {old_equip_days} 天修改為 {equip_days} 天\n[注意] 你之後的報名者的開始和結束日期將相應調整！"
+                
+                await interaction.followup.send(
+                    f"[OK] 信息已更新! {priority_text}{change_info}\n\n"
+                    f"遊戲名稱: {self.game_name.value}\n"
+                    f"收裝備天數: {equip_days} 天\n"
+                    f"最高天命花費: {max_fate_cost}\n\n"
+                    f"📢 收裝備排序名單將在今天晚上 22:00 公布(超過22點就是隔天公布)",
+                    ephemeral=True
+                )
+            else:
+                # 創建新記錄
+                c.execute('''INSERT INTO users
+                    (user_id, username, game_name, equip_days, max_fate_cost, is_priority, created_at, queue_priority)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+                    (interaction.user.id, interaction.user.name,
+                     self.game_name.value, equip_days, max_fate_cost, is_priority, now_iso, queue_priority))
 
-                    # 檢查是否還在報名期間內（或尚未開始）
-                    if now < end_date.replace(hour=23, minute=59, second=59):
-                        # 報名還沒結束
-                        remaining_days = (end_date.date() - now.date()).days + 1
-                        await interaction.followup.send(
-                            f"[ERROR] 你已經有一個活動中的報名！\n"
-                            f"預計結束日期: {end_date.strftime('%m月%d號')}\n"
-                            f"請等待報名結束後再重新報名 (還有約 {remaining_days} 天)",
-                            ephemeral=True
-                        )
-                        conn.close()
-                        return
+                conn.commit()
 
-                    # 報名已結束，刪除舊記錄
-                    c.execute('DELETE FROM users WHERE user_id = ?', (interaction.user.id,))
-                else:
-                    # 無法解析日期，直接刪除舊記錄
-                    c.execute('DELETE FROM users WHERE user_id = ?', (interaction.user.id,))
-
-            # 創建新記錄（無論是新用戶還是舊報名已結束的用戶）
-            c.execute('''INSERT INTO users
-                (user_id, username, game_name, equip_days, max_fate_cost, is_priority, created_at, queue_priority)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
-                (interaction.user.id, interaction.user.name,
-                 self.game_name.value, equip_days, max_fate_cost, is_priority, now_iso, queue_priority))
-
-            conn.commit()
-            conn.close()
-
-            # 回應用戶（僅用戶可見）
-            priority_text = "✨ [優先級用戶]" if is_priority else ""
-            queue_status = ""
-            if queue_priority == 1:
-                queue_status = "\n\n🔔 [特別提醒] 由於你是優先級用戶且當前有人在收裝備，你已加入優先隊列，將排在第二順位！"
+                # 回應用戶（僅用戶可見）
+                priority_text = "✨ [優先級用戶]" if is_priority else ""
+                queue_status = ""
+                if queue_priority == 1:
+                    queue_status = "\n\n🔔 [特別提醒] 由於你是優先級用戶且當前有人在收裝備，你已加入優先隊列，將排在第二順位！"
+                
+                await interaction.followup.send(
+                    f"[OK] 信息已保存! {priority_text}{queue_status}\n\n"
+                    f"遊戲名稱: {self.game_name.value}\n"
+                    f"收裝備天數: {equip_days} 天\n"
+                    f"最高天命花費: {max_fate_cost}\n\n"
+                    f"📢 收裝備排序名單將在今天晚上 22:00 公布(超過22點就是隔天公布)",
+                    ephemeral=True
+                )
             
-            await interaction.followup.send(
-                f"[OK] 信息已保存! {priority_text}{queue_status}\n\n"
-                f"遊戲名稱: {self.game_name.value}\n"
-                f"收裝備天數: {equip_days} 天\n"
-                f"最高天命花費: {max_fate_cost}\n\n"
-                f"📢 收裝備排序名單將在今天晚上 22:00 公布(超過22點就是隔天公布)",
-                ephemeral=True
-            )
+            conn.close()
         except Exception as e:
             print(f"[ERROR] Modal提交錯誤: {type(e).__name__}: {str(e)}")
             try:
