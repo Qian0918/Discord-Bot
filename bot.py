@@ -156,7 +156,7 @@ last_reminder_sun_8_55pm_date = None
 last_reminder_sun_9_25pm_date = None
 last_reminder_biweekly_thu_9_45pm_date = None
 last_reminder_wed_9pm_date = None
-last_reminder_equip_date = None
+last_reminder_equip_morning_date = None  # 追蹤早上9點提醒
 
 # 迷霧模式狀態
 mist_mode_enabled = False
@@ -253,15 +253,15 @@ def get_actual_dates(user_id):
     c = conn.cursor()
 
     # 獲取所有用戶，按優先級、隊列優先級和時間排序
-    # queue_priority=1的用戶排在最前面（在優先級用戶之中）
-    c.execute('''SELECT user_id, equip_days, created_at, queue_priority
+    # 優先級：普通優先級用戶 -> 插隊優先級用戶 -> 普通用戶
+    c.execute('''SELECT user_id, equip_days, created_at, queue_priority, is_priority
                  FROM users
                  ORDER BY 
                    CASE 
-                     WHEN queue_priority = 1 AND is_priority = 1 THEN 0
-                     ELSE 1
+                     WHEN is_priority = 0 THEN 2
+                     WHEN queue_priority = 1 THEN 1
+                     ELSE 0
                    END,
-                   is_priority DESC, 
                    created_at ASC''')
     all_users = c.fetchall()
 
@@ -277,7 +277,7 @@ def get_actual_dates(user_id):
 
     # 計算實際日期
     current_start = None
-    for uid, equip_days, created_at, queue_priority in all_users:
+    for uid, equip_days, created_at, queue_priority, is_priority in all_users:
         if current_start is None:
             try:
                 current_start = datetime.fromisoformat(created_at)
@@ -303,14 +303,15 @@ def get_current_executing_user():
     c = conn.cursor()
 
     # 獲取所有用戶，按優先級和隊列優先級排序
-    c.execute('''SELECT user_id, equip_days, created_at, queue_priority
+    # 優先級：普通優先級用戶 -> 插隊優先級用戶 -> 普通用戶
+    c.execute('''SELECT user_id, equip_days, created_at, queue_priority, is_priority
                  FROM users
                  ORDER BY 
                    CASE 
-                     WHEN queue_priority = 1 AND is_priority = 1 THEN 0
-                     ELSE 1
+                     WHEN is_priority = 0 THEN 2
+                     WHEN queue_priority = 1 THEN 1
+                     ELSE 0
                    END,
-                   is_priority DESC, 
                    created_at ASC''')
     all_users = c.fetchall()
     conn.close()
@@ -856,14 +857,13 @@ async def on_ready():
     print(f'{bot.user} 已上線！')
     print(f"機器人 ID: {bot.user.id}")
 
-    # 啟動定時提醒任務
-    if not daily_reminder.is_running():
-        daily_reminder.start()
-        print("[INFO] 已啟動每日提醒任務")
-
     if not announcement_schedule.is_running():
         announcement_schedule.start()
         print("[INFO] 已啟動每日名單公告任務")
+
+    if not reminder_equip_morning.is_running():
+        reminder_equip_morning.start()
+        print("[INFO] 已啟動每日早上9點提醒任務")
 
     # 啟動新的定時提醒任務
     if not reminder_mon_wed_fri_12pm.is_running():
@@ -905,44 +905,41 @@ async def on_ready():
         traceback.print_exc()
 
 @tasks.loop(minutes=1)
-async def daily_reminder():
-    """每天晚上22:10提醒明天要開始收裝備的人"""
-    global last_reminder_equip_date
+async def reminder_equip_morning():
+    """每天早上9點提醒當天開始收裝備的用戶"""
+    global last_reminder_equip_morning_date
     try:
         now = datetime.now(TZ_TAIPEI)
         
-        # 檢查是否是22:10
-        if now.hour != 22 or now.minute != 10:
+        # 檢查是否是9:00
+        if now.hour != 9 or now.minute != 0:
             return
         
         # 檢查是否已在今天發送過（防止重複發送）
-        if last_reminder_equip_date == now.date():
+        if last_reminder_equip_morning_date == now.date():
             return
 
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
 
         # 獲取所有用戶，按優先級、隊列優先級和時間排序
+        # 優先級：普通優先級用戶 -> 插隊優先級用戶 -> 普通用戶
         c.execute('''SELECT user_id, username, equip_days, created_at, is_priority, queue_priority
                      FROM users
                      ORDER BY 
                        CASE 
-                         WHEN queue_priority = 1 AND is_priority = 1 THEN 0
-                         ELSE 1
+                         WHEN is_priority = 0 THEN 2
+                         WHEN queue_priority = 1 THEN 1
+                         ELSE 0
                        END,
-                       is_priority DESC, 
                        created_at ASC''')
         all_users = c.fetchall()
         conn.close()
 
-        if not all_users:
-            return
-
-        # 計算所有用戶的開始日期
-        tomorrow = (datetime.now(TZ_TAIPEI) + timedelta(days=1)).date()
-        users_starting_tomorrow = []
-
+        # 計算當天開始的用戶
+        today = now.date()
         current_start = None
+        
         for user_id, username, equip_days, created_at, is_priority, queue_priority in all_users:
             if current_start is None:
                 try:
@@ -955,25 +952,22 @@ async def daily_reminder():
 
             start_date = current_start.date()
 
-            # 檢查是否是明天開始
-            if start_date == tomorrow:
-                users_starting_tomorrow.append((user_id, username))
+            # 檢查是否是今天開始
+            if start_date == today:
+                channel = bot.get_channel(ANNOUNCEMENT_CHANNEL_ID)
+                if channel:
+                    message = f"<@{user_id}> 你今天可以開始收裝備啦！加油～ 💪"
+                    await channel.send(message)
+                    print(f"[INFO] 已發送早上9點提醒: {username}")
+                
+                last_reminder_equip_morning_date = now.date()
+                break
 
             # 計算下一個用戶的開始日期
             current_start = current_start + timedelta(days=equip_days) + timedelta(days=1)
 
-        # 如果有人明天開始，發送提醒
-        if users_starting_tomorrow:
-            channel = bot.get_channel(ANNOUNCEMENT_CHANNEL_ID)
-            if channel:
-                for user_id, username in users_starting_tomorrow:
-                    message = f"<@{user_id}> 可以開始收裝備啦～"
-                    await channel.send(message)
-                print(f"[INFO] 已發送明日收裝備提醒: {[username for _, username in users_starting_tomorrow]}")
-            
-            last_reminder_equip_date = now.date()
     except Exception as e:
-        print(f"[ERROR] 定時提醒任務出錯: {e}")
+        print(f"[ERROR] 早上提醒任務出錯: {e}")
 
 @tasks.loop(minutes=1)
 async def announcement_schedule():
@@ -995,20 +989,18 @@ async def announcement_schedule():
         c = conn.cursor()
 
         # 獲取所有用戶，按優先級、隊列優先級和時間排序
+        # 優先級：普通優先級用戶 -> 插隊優先級用戶 -> 普通用戶
         c.execute('''SELECT username, game_name, equip_days, created_at, is_priority, user_id, queue_priority
                      FROM users
                      ORDER BY 
                        CASE 
-                         WHEN queue_priority = 1 AND is_priority = 1 THEN 0
-                         ELSE 1
+                         WHEN is_priority = 0 THEN 2
+                         WHEN queue_priority = 1 THEN 1
+                         ELSE 0
                        END,
-                       is_priority DESC, 
                        created_at ASC''')
         all_users = c.fetchall()
         conn.close()
-
-        if not all_users:
-            return
 
         channel = bot.get_channel(ANNOUNCEMENT_CHANNEL_ID)
         if not channel:
@@ -1307,14 +1299,15 @@ async def query_equipment(interaction: Interaction):
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
         # 按優先級、隊列優先級和提交時間排序
+        # 優先級：普通優先級用戶 -> 插隊優先級用戶 -> 普通用戶
         c.execute('''SELECT username, game_name, equip_days, created_at, is_priority, queue_priority
                      FROM users
                      ORDER BY 
                        CASE 
-                         WHEN queue_priority = 1 AND is_priority = 1 THEN 0
-                         ELSE 1
+                         WHEN is_priority = 0 THEN 2
+                         WHEN queue_priority = 1 THEN 1
+                         ELSE 0
                        END,
-                       is_priority DESC, 
                        created_at ASC''')
         all_users = c.fetchall()
         conn.close()
@@ -1387,14 +1380,15 @@ async def test_announcement(interaction: Interaction):
         c = conn.cursor()
 
         # 獲取所有用戶，按優先級、隊列優先級和時間排序
+        # 優先級：普通優先級用戶 -> 插隊優先級用戶 -> 普通用戶
         c.execute('''SELECT username, game_name, equip_days, created_at, is_priority, user_id, queue_priority
                      FROM users
                      ORDER BY 
                        CASE 
-                         WHEN queue_priority = 1 AND is_priority = 1 THEN 0
-                         ELSE 1
+                         WHEN is_priority = 0 THEN 2
+                         WHEN queue_priority = 1 THEN 1
+                         ELSE 0
                        END,
-                       is_priority DESC, 
                        created_at ASC''')
         all_users = c.fetchall()
         conn.close()
